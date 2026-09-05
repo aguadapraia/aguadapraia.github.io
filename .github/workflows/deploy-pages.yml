@@ -1,0 +1,75 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.repository == 'aguadapraia/aguadapraia.github.io'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b
+      - name: Install dependencies
+        run: npm ci
+      - name: Validate frontend
+        run: |
+          npm audit --include=dev --audit-level=low
+          npm run lint
+      - name: Validate public configuration
+        env:
+          VITE_DATA_API_BASE: ${{ vars.VITE_DATA_API_BASE }}
+          CLOUDFLARE_WEB_ANALYTICS_TOKEN: ${{ vars.CLOUDFLARE_WEB_ANALYTICS_TOKEN }}
+        run: |
+          node --input-type=module -e "
+            const api = new URL(process.env.VITE_DATA_API_BASE);
+            if (api.protocol !== 'https:' || api.username || api.password || api.search || api.hash) process.exit(1);
+            if (!/^[a-f0-9]{32}$/i.test(process.env.CLOUDFLARE_WEB_ANALYTICS_TOKEN || '')) process.exit(1);
+          "
+      - name: Validate API compatibility
+        env:
+          VITE_DATA_API_BASE: ${{ vars.VITE_DATA_API_BASE }}
+        run: |
+          curl --fail --silent --show-error \
+            --retry 3 --retry-all-errors --max-time 30 \
+            --header 'Origin: https://aguadapraia.github.io' \
+            "${VITE_DATA_API_BASE%/}/evolution/index" \
+            --output "$RUNNER_TEMP/archive-index.json"
+          node -e "const data = require(process.env.RUNNER_TEMP + '/archive-index.json'); if (data.schemaVersion !== 1 || !Array.isArray(data.dates)) process.exit(1)"
+      - name: Build frontend
+        env:
+          VITE_DATA_API_BASE: ${{ vars.VITE_DATA_API_BASE }}
+          VITE_CLOUDFLARE_WEB_ANALYTICS_TOKEN: ${{ vars.CLOUDFLARE_WEB_ANALYTICS_TOKEN }}
+        run: npm run build
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e

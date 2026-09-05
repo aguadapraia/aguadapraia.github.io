@@ -21,7 +21,6 @@ import { HIGHLIGHT_SIMILARITY } from '../lib/highlight-policy'
 function dataUrl(
   subpath: string,
   apiBase: string | undefined = import.meta.env.VITE_DATA_API_BASE as string | undefined,
-  baseUrl: string = import.meta.env.BASE_URL,
 ): string {
   const localApiBase =
     apiBase ??
@@ -36,10 +35,8 @@ function dataUrl(
       : localApiBase
     return `${base}/${subpath.replace(/\.json(?=$|\?)/, '')}`
   }
-  return publicAssetUrl(`data/${subpath}`, baseUrl)
+  throw new Error('The public data API is not configured')
 }
-
-export { dataUrl }
 
 interface RawBeach {
   id: string

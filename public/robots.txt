@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://victorious-flower-0d1b0de03.7.azurestaticapps.net/sitemap.xml
+Sitemap: https://aguadapraia.github.io/sitemap.xml

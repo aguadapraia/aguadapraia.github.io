@@ -75,7 +75,7 @@ export default function SettingsPanel({ settings, onSettingsChange, isMobile = f
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') { e.preventDefault(); close() }
       if (e.key === 'Tab') {
-        const buttons = panelRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')
+        const buttons = panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href]')
         const first = buttons?.[0]
         const last = buttons?.[buttons.length - 1]
         if (e.shiftKey && document.activeElement === first) {
@@ -161,6 +161,10 @@ export default function SettingsPanel({ settings, onSettingsChange, isMobile = f
               ]}
               onChange={(value) => set('windUnit', value)}
             />
+            <a className="sp-privacy" href="/privacy.html" target="_blank" rel="noreferrer noopener">
+              {settings.language === 'pt' ? 'Privacidade' : 'Privacy'}
+              <span className="sr-only"> · {copy.opensNewWindow}</span>
+            </a>
           </div>
         </>
       )}

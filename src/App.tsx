@@ -347,7 +347,7 @@ export default function App() {
           {copy.attribution} IPMA.pt<span>· <span className="attribution-freshness">{copy.freshness} </span><time dateTime={updatedAt} title={copy.freshness}>{formatFreshnessTimestamp(updatedAt, language)}</time></span>
         </a>
         <span className="attribution-credit">
-          <a href="https://github.com/f-caetano/aguadapraia" target="_blank" rel="noreferrer noopener"
+          <a href="https://github.com/aguadapraia/aguadapraia.github.io" target="_blank" rel="noreferrer noopener"
             className="attribution-github" aria-label={`Filipe Caetano · GitHub (${copy.opensNewWindow})`}>
             <GithubMark /><span>Filipe Caetano</span>
           </a>
