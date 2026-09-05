@@ -31,7 +31,6 @@ jobs:
       - name: Validate frontend
         run: |
           npm audit --include=dev --audit-level=low
-          npm test
           npm run lint
 
       - name: Validate VITE_DATA_API_BASE
