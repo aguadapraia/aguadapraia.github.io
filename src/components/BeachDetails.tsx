@@ -1,10 +1,10 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { ArrowUpRight, Droplets, ThermometerSun, Wind } from 'lucide-react'
-import { historyPointFromTimeline, loadEvolutionBeachHistories, loadTimelineIndex } from '../data/api'
+import { historyPointFromTimeline, loadHistoryBeachHistories, loadTimelineIndex } from '../data/api'
 import { getCopy, type Language } from '../i18n'
 import { forecastForDate } from '../lib/beach-discovery'
 import { lisbonDate } from '../lib/date-classification'
-import { availableEvolutionDates, evolutionPeriodBounds } from '../lib/evolution-period'
+import { availableHistoryDates, historyPeriodBounds } from '../lib/history-period'
 import { convertWind, type WindUnit } from '../lib/units'
 import type { BeachViewModel, HistoryPoint, MapMetric } from '../types'
 import BeachDayHours from './BeachDayHours'
@@ -44,11 +44,11 @@ export default function BeachDetails({
     setError(false)
     loadTimelineIndex().then(async (index) => {
       if (controller.signal.aborted) return
-      const archived = availableEvolutionDates(index.dates.filter((day) => day < lisbonDate()))
-      const bounds = evolutionPeriodBounds('30d', archived.at(-1) ?? '')
+      const archived = availableHistoryDates(index.dates.filter((day) => day < lisbonDate()))
+      const bounds = historyPeriodBounds('30d', archived.at(-1) ?? '')
       if (!bounds) { setHistory([]); return }
       const start = bounds.start < archived[0] ? archived[0] : bounds.start
-      const result = await loadEvolutionBeachHistories([beach.id], start, bounds.end, controller.signal)
+      const result = await loadHistoryBeachHistories([beach.id], start, bounds.end, controller.signal)
       if (controller.signal.aborted) return
       const points = result.histories.find((item) => item.beachId === beach.id)?.points
       if (!points) throw new Error('Requested beach history is missing')

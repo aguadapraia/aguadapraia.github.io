@@ -5,7 +5,7 @@ import {
   chartLineReadings, chartLineStatistics, chartReadingRange, DEFAULT_CHART_VISIBILITY,
   visibleChartReadings, visibleChartStatistics, type ChartReadings, type ChartStatistic,
 } from '../lib/chart-visibility'
-import { resolveEvolutionPeriod } from '../lib/evolution-period'
+import { resolveHistoryPeriod } from '../lib/history-period'
 import { convertWind, type WindUnit } from '../lib/units'
 import type { DailyBeachForecast, HistoryPoint, MapMetric } from '../types'
 import ChartSeriesLegend from './ChartSeriesLegend'
@@ -49,7 +49,7 @@ export default function MetricHistoryChart({
     history.filter((point) => point.kind === 'history').forEach((point) => add(point, 'history'))
     forecasts.forEach((point) => add(point, 'forecast'))
     const dates = [...points.keys()].sort()
-    const period = resolveEvolutionPeriod(dates[0] ?? '', dates.at(-1) ?? '', dates)
+    const period = resolveHistoryPeriod(dates[0] ?? '', dates.at(-1) ?? '', dates)
     if (!period) return []
     return period.calendarDates.map<ChartPoint>((date) => points.get(date) ?? { date })
   }, [history, forecasts, metric, windUnit])

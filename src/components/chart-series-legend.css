@@ -4,7 +4,7 @@
 .chart-series-legend button:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 2px; }
 .chart-series-legend button[aria-pressed="false"] { color: var(--cp-text-muted); text-decoration: line-through; }
 .chart-series-legend button[aria-pressed="false"] i { opacity: .3; }
-.chart-series-legend i { display: block; width: 17px; border-top: 2px solid var(--chart-colour, var(--evo-metric, var(--cp-accent))); }
+.chart-series-legend i { display: block; width: 17px; border-top: 2px solid var(--chart-colour, var(--history-metric, var(--cp-accent))); }
 .chart-series-legend button[data-series="min"] i { border-top-style: dotted; }
 .chart-series-legend button[data-series="avg"] i { border-top-width: 3px; }
 .chart-series-legend button[data-series="forecast"] { margin-left: 3px; border-left-color: var(--cp-border); border-radius: 0 6px 6px 0; }

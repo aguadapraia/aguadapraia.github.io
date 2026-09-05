@@ -139,7 +139,7 @@ export interface TimelineIndexData {
   generatedAt: string
 }
 
-export interface EvolutionSummaryData {
+export interface HistorySummaryData {
   schemaVersion: number
   start: string
   end: string
@@ -161,14 +161,14 @@ export type HistoricalRecords = Record<'water' | 'air' | 'wind', {
   max: HistoricalRecord[]
 }>
 
-export interface EvolutionDateData {
+export interface HistoryDateData {
   schemaVersion: number
   date: string
   points: TimelinePoint[]
   generatedAt: string
 }
 
-export interface EvolutionBeachHistoriesData {
+export interface HistoryBeachHistoriesData {
   schemaVersion: number
   start: string
   end: string
@@ -300,7 +300,7 @@ const metricAggregateSchema = z.object({
   coverage: z.number().min(0).max(1),
 })
 
-const evolutionAggregateSchema = z.object({
+const historyAggregateSchema = z.object({
   date: z.string().date(),
   water: metricAggregateSchema.nullable(),
   air: metricAggregateSchema.nullable(),
@@ -331,25 +331,25 @@ const historicalCandidatesSchema: z.ZodType<HistoricalRecords> = z.object({
   wind: historicalCandidateMetricSchema,
 })
 
-const evolutionSummarySchema: z.ZodType<EvolutionSummaryData> = z.object({
+const historySummarySchema: z.ZodType<HistorySummaryData> = z.object({
   schemaVersion: z.number().int(),
   start: z.string().date(),
   end: z.string().date(),
   dates: z.array(z.string().date()),
-  aggregates: z.array(evolutionAggregateSchema),
+  aggregates: z.array(historyAggregateSchema),
   records: historicalRecordsSchema.optional(),
   recordCandidates: historicalCandidatesSchema.optional(),
   generatedAt: z.string().datetime({ offset: true }),
 })
 
-const evolutionDateSchema: z.ZodType<EvolutionDateData> = z.object({
+const historyDateSchema: z.ZodType<HistoryDateData> = z.object({
   schemaVersion: z.number().int(),
   date: z.string().date(),
   points: z.array(timelinePointSchema),
   generatedAt: z.string().datetime({ offset: true }),
 })
 
-const evolutionBeachHistoriesSchema: z.ZodType<EvolutionBeachHistoriesData> =
+const historyBeachHistoriesSchema: z.ZodType<HistoryBeachHistoriesData> =
   z.object({
     schemaVersion: z.number().int(),
     start: z.string().date(),
@@ -583,7 +583,7 @@ export async function loadTimelineIndex(): Promise<TimelineIndexData> {
     return timelineIndexCache.promise
   }
   const promise = (async () => {
-    const response = await fetch(dataUrl('evolution/index.json'), {
+    const response = await fetch(dataUrl('historico/index.json'), {
       cache: 'default',
     })
     if (!response.ok) {
@@ -599,72 +599,63 @@ export async function loadTimelineIndex(): Promise<TimelineIndexData> {
   return promise
 }
 
-export function resetEvolutionIndexCache(): void {
-  timelineIndexCache = undefined
-}
-
-export async function loadEvolutionSummary(
+export async function loadHistorySummary(
   start: string,
   end: string,
   territory: TerritoryFilter,
   signal?: AbortSignal,
   includeCandidates = false,
-): Promise<EvolutionSummaryData> {
+): Promise<HistorySummaryData> {
   const query = new URLSearchParams({
     start, end, territory, records: includeCandidates ? '2' : '1',
     temperatureTolerance: String(HIGHLIGHT_SIMILARITY.temperatureCelsius),
     windToleranceKnots: String(HIGHLIGHT_SIMILARITY.windKnots),
   })
   const response = await fetch(
-    dataUrl(`evolution/summary.json?${query.toString()}`),
+    dataUrl(`historico/summary.json?${query.toString()}`),
     { cache: 'default', signal },
   )
   if (!response.ok) {
-    throw new Error(`Evolution summary unavailable (${response.status})`)
+    throw new Error(`History summary unavailable (${response.status})`)
   }
-  return evolutionSummarySchema.parse(await response.json())
+  return historySummarySchema.parse(await response.json())
 }
 
-export async function loadEvolutionDate(
+export async function loadHistoryDate(
   date: string,
   territory: TerritoryFilter,
   signal?: AbortSignal,
-): Promise<EvolutionDateData> {
+): Promise<HistoryDateData> {
   const query = new URLSearchParams({ territory })
   const response = await fetch(
-    dataUrl(`evolution/date/${date}.json?${query.toString()}`),
+    dataUrl(`historico/date/${date}.json?${query.toString()}`),
     { cache: 'default', signal },
   )
   if (!response.ok) {
-    throw new Error(`Evolution date unavailable (${response.status})`)
+    throw new Error(`History date unavailable (${response.status})`)
   }
-  return evolutionDateSchema.parse(await response.json())
+  return historyDateSchema.parse(await response.json())
 }
 
-export async function loadEvolutionBeachHistories(
+export async function loadHistoryBeachHistories(
   beachIds: readonly string[],
   start: string,
   end: string,
   signal?: AbortSignal,
-): Promise<EvolutionBeachHistoriesData> {
+): Promise<HistoryBeachHistoriesData> {
   const query = new URLSearchParams({
     ids: beachIds.join(','),
     start,
     end,
   })
   const response = await fetch(
-    dataUrl(`evolution/beaches.json?${query.toString()}`),
+    dataUrl(`historico/beaches.json?${query.toString()}`),
     { cache: 'default', signal },
   )
   if (!response.ok) {
-    throw new Error(`Evolution beach histories unavailable (${response.status})`)
+    throw new Error(`History beach histories unavailable (${response.status})`)
   }
-  return evolutionBeachHistoriesSchema.parse(await response.json())
-}
-
-
-export function resetDayDetailCache(): void {
-  dayDetailCache.clear()
+  return historyBeachHistoriesSchema.parse(await response.json())
 }
 
 export async function loadBeachDayDetail(

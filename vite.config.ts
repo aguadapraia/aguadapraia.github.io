@@ -28,7 +28,7 @@ function staticPages(apiBase: string | undefined): Plugin {
       const routes: { view: AppViewMode; title: string }[] = [
         { view: 'map', title: 'Mapa' },
         { view: 'table', title: 'Tabela' },
-        { view: 'evolution', title: 'Histórico' },
+        { view: 'history', title: 'Histórico' },
       ]
       for (const { view, title } of routes) {
         const route = pathForView(view)

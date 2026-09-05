@@ -18,7 +18,7 @@ import type { BeachDataset, BeachViewModel, TerritoryFilter } from './types'
 import './app.css'
 
 const PortugalMap = lazy(() => import('./components/PortugalMap'))
-const EvolutionView = lazy(() => import('./components/EvolutionView'))
+const HistoryView = lazy(() => import('./components/HistoryView'))
 const BeachTableView = lazy(() => import('./components/BeachTableView'))
 
 function GithubMark() {
@@ -105,10 +105,10 @@ export default function App() {
     const handlePopState = () => {
       const nextView = viewFromPath(window.location.pathname)
       const origin = window.history.state?.returnView
-      if (nextView === 'evolution') captureHistoryOrigin()
-      returningFromHistory.current = viewMode === 'evolution' && nextView === historyOrigin
-      setHistoryOrigin(nextView === 'evolution' && (origin === 'map' || origin === 'table') ? origin : null)
-      if (nextView === 'evolution') {
+      if (nextView === 'history') captureHistoryOrigin()
+      returningFromHistory.current = viewMode === 'history' && nextView === historyOrigin
+      setHistoryOrigin(nextView === 'history' && (origin === 'map' || origin === 'table') ? origin : null)
+      if (nextView === 'history') {
         const id = window.history.state?.beachId
         setHistoryBeachId(typeof id === 'string' ? id : undefined)
       } else if (!returningFromHistory.current) {
@@ -121,7 +121,7 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState)
   }, [historyOrigin, viewMode])
   useEffect(() => {
-    if (viewMode === 'evolution' || !returningFromHistory.current) return
+    if (viewMode === 'history' || !returningFromHistory.current) return
     returningFromHistory.current = false
     const frame = requestAnimationFrame(() => {
       for (const { element, top, left } of historyScroll.current) element.scrollTo({ top, left })
@@ -132,14 +132,14 @@ export default function App() {
     return () => cancelAnimationFrame(frame)
   }, [viewMode])
   useEffect(() => {
-    const label = viewMode === 'map' ? copy.mapView : viewMode === 'table' ? copy.tableView : copy.evolutionView
+    const label = viewMode === 'map' ? copy.mapView : viewMode === 'table' ? copy.tableView : copy.historyView
     const title = `${label} - ÁguaDaPraia`
     document.title = title
     document.querySelector('link[rel="canonical"]')?.setAttribute('href', canonicalUrlForView(viewMode))
     document.querySelector('meta[property="og:url"]')?.setAttribute('content', canonicalUrlForView(viewMode))
     document.querySelector('meta[property="og:title"]')?.setAttribute('content', title)
     document.querySelector('meta[name="twitter:title"]')?.setAttribute('content', title)
-  }, [copy.evolutionView, copy.mapView, copy.tableView, viewMode])
+  }, [copy.historyView, copy.mapView, copy.tableView, viewMode])
 
   const territoryBeaches = useMemo(() => {
     if (!dataset) return []
@@ -163,7 +163,7 @@ export default function App() {
   }
   function navigateToView(view: AppViewMode) {
     if (view === viewMode) return
-    if (viewMode === 'evolution' && view === historyOrigin) { returnFromHistory(); return }
+    if (viewMode === 'history' && view === historyOrigin) { returnFromHistory(); return }
     historyTrigger.current = null
     historyScroll.current = []
     setHistoryOrigin(null)
@@ -178,12 +178,12 @@ export default function App() {
     setNearbyIds(nearby)
   }
   function exploreHistory(beach?: BeachViewModel) {
-    if (viewMode === 'evolution') return
+    if (viewMode === 'history') return
     captureHistoryOrigin()
     setHistoryOrigin(viewMode)
     setHistoryBeachId(beach?.id)
-    setViewMode('evolution')
-    window.history.pushState({ returnView: viewMode, beachId: beach?.id }, '', pathForView('evolution'))
+    setViewMode('history')
+    window.history.pushState({ returnView: viewMode, beachId: beach?.id }, '', pathForView('history'))
   }
   function captureHistoryOrigin() {
     const main = document.getElementById('app-content')
@@ -232,7 +232,7 @@ export default function App() {
   const navigation = [
     { view: 'map', label: copy.mapView, icon: MapIcon },
     { view: 'table', label: copy.tableView, icon: List },
-    { view: 'evolution', label: copy.evolutionView, icon: TrendingUp },
+    { view: 'history', label: copy.historyView, icon: TrendingUp },
   ] as const
 
   return (
@@ -252,7 +252,7 @@ export default function App() {
             onClick={(event) => {
               if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
               event.preventDefault()
-              if (view === 'evolution') exploreHistory()
+              if (view === 'history') exploreHistory()
               else navigateToView(view)
             }}><Icon size={17} />{label}</a>)}
         </nav>
@@ -261,7 +261,7 @@ export default function App() {
         </div>
       </header>
 
-      {viewMode !== 'evolution' && activeDate < lisbonDate() && <p className="beach-stale-notice" role="status">
+      {viewMode !== 'history' && activeDate < lisbonDate() && <p className="beach-stale-notice" role="status">
         {pt ? 'Ainda não há previsão atualizada para hoje. Estás a ver a última data publicada.' : 'Today’s forecast is not available yet. Showing the last published date.'}
       </p>}
 
@@ -333,9 +333,9 @@ export default function App() {
           </select>} />
         </Suspense>
       )}
-      {viewMode === 'evolution' && (
+      {viewMode === 'history' && (
         <Suspense fallback={<main className="beach-view-loading"><LoadingIndicator label={copy.loadingHistory} /></main>}>
-          <EvolutionView key={historyBeachId ?? 'territory'} dataset={dataset} language={language}
+          <HistoryView key={historyBeachId ?? 'territory'} dataset={dataset} language={language}
             windUnit={windUnit} theme={theme} initialTerritory={territory}
             initialMapMetric={mapMetric} initialBeachId={historyBeachId}
             onReturn={returnFromHistory} returnLabel={historyOrigin === 'table' ? copy.backToTable : copy.backToMap} />

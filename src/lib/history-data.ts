@@ -1,4 +1,4 @@
-import { evolutionRequestChunks } from './evolution-period'
+import { historyRequestChunks } from './history-period'
 import type { HistoricalRecord, HistoricalRecords } from '../data/api'
 import type { BeachViewModel, HistoryPoint, MapMetric } from '../types'
 import { selectDiverseHighlights } from './highlight-policy'
@@ -52,7 +52,7 @@ export function recordsFromHistories(histories: ReadonlyMap<string, HistoryPoint
 }
 
 /** Complete one bounded public request at a time; successful chunks survive a retry. */
-export async function loadBoundedEvolution<T>({
+export async function loadBoundedHistory<T>({
   start, end, signal, cache, cacheKey, load,
 }: {
   start: string
@@ -62,8 +62,8 @@ export async function loadBoundedEvolution<T>({
   cacheKey: string
   load: (start: string, end: string, signal: AbortSignal) => Promise<T>
 }): Promise<T[]> {
-  const chunks = evolutionRequestChunks(start, end)
-  if (!chunks.length) throw new RangeError('Invalid evolution period')
+  const chunks = historyRequestChunks(start, end)
+  if (!chunks.length) throw new RangeError('Invalid history period')
   const values: T[] = []
   for (const chunk of chunks) {
     signal.throwIfAborted()

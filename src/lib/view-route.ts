@@ -1,9 +1,9 @@
-export type AppViewMode = 'map' | 'table' | 'evolution'
+export type AppViewMode = 'map' | 'table' | 'history'
 
 const viewPaths: Record<AppViewMode, string> = {
   map: '/',
   table: '/tabela/',
-  evolution: '/evolucao/',
+  history: '/historico/',
 }
 
 export const productionOrigin = 'https://aguadapraia.github.io'
@@ -19,6 +19,6 @@ export function canonicalUrlForView(view: AppViewMode): string {
 export function viewFromPath(pathname: string): AppViewMode {
   const normalized = `${pathname.replace(/\/+$/, '')}/`
   if (normalized === viewPaths.table) return 'table'
-  if (normalized === viewPaths.evolution) return 'evolution'
+  if (normalized === viewPaths.history) return 'history'
   return 'map'
 }

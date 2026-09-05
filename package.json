@@ -6,11 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "build:local": "tsc -b && vite build --base /",
     "typecheck": "tsc -b",
     "lint": "oxlint src --deny-warnings",
-    "preview": "vite preview",
-    "preview:local": "npm run build:local && vite preview --host 127.0.0.1 --port 5173"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.3.0",

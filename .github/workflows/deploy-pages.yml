@@ -48,7 +48,7 @@ jobs:
           curl --fail --silent --show-error \
             --retry 3 --retry-all-errors --max-time 30 \
             --header 'Origin: https://aguadapraia.github.io' \
-            "${VITE_DATA_API_BASE%/}/evolution/index" \
+            "${VITE_DATA_API_BASE%/}/historico/index" \
             --output "$RUNNER_TEMP/archive-index.json"
           node -e "const data = require(process.env.RUNNER_TEMP + '/archive-index.json'); if (data.schemaVersion !== 1 || !Array.isArray(data.dates)) process.exit(1)"
       - name: Build frontend

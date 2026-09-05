@@ -4,9 +4,9 @@
 
 # ÁguaDaPraia
 
-Portugal beach conditions using meteorological and oceanographic data from IPMA.pt, focused on water temperature, air temperature, average wind conditions, and historical trends.
+Portugal beach forecasts using meteorological and oceanographic data from IPMA.pt, focused on water temperature, air temperature, average wind conditions, and saved forecast history.
 
-Built as a non-commercial proof of concept through approximately five days of iterative development with GPT-5.6.
+Built for fun as a non-commercial project I found useful myself, through approximately five days of iterative development with GPT-5.6.
 
 Filipe Caetano © 2026
 

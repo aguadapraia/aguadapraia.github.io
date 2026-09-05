@@ -4,9 +4,9 @@ import { ArrowLeft, ArrowUp, CalendarDays, ChevronDown, Droplets, Search, Thermo
 import {
   historyPointFromTimeline,
   loadBeachDayDetail,
-  loadEvolutionBeachHistories,
-  loadEvolutionDate,
-  loadEvolutionSummary,
+  loadHistoryBeachHistories,
+  loadHistoryDate,
+  loadHistorySummary,
   loadTimelineIndex,
   type HistoricalRecords,
   type TimelinePoint,
@@ -22,14 +22,14 @@ import {
   chartLineReadings, chartLineStatistics, chartReadingRange, DEFAULT_CHART_VISIBILITY,
   summarizeChartStatistic, visibleChartReadings, visibleChartStatistics, type ChartReadings, type ChartStatistic,
 } from '../lib/chart-visibility'
-import { loadBoundedEvolution, mergeHistoricalRecords, recordsFromHistories } from '../lib/evolution-history'
+import { loadBoundedHistory, mergeHistoricalRecords, recordsFromHistories } from '../lib/history-data'
 import {
-  availableEvolutionDates,
+  availableHistoryDates,
   calendarDayCount,
-  evolutionPeriodBounds,
-  resolveEvolutionPeriod,
-  type EvolutionPeriod,
-} from '../lib/evolution-period'
+  historyPeriodBounds,
+  resolveHistoryPeriod,
+  type HistoryPeriod,
+} from '../lib/history-period'
 import { convertWind, type WindUnit } from '../lib/units'
 import { windDirectionDegrees } from '../lib/wind-direction'
 import type { BeachDataset, BeachDayDetail, BeachViewModel, HistoryPoint, MapMetric, SettingsMapMetric, TerritoryAggregate, TerritoryFilter, Theme } from '../types'
@@ -37,7 +37,7 @@ import LoadingIndicator from './LoadingIndicator'
 import ChartSeriesLegend from './ChartSeriesLegend'
 import MapLegend from './MapLegend'
 import TerritorySelect from './TerritorySelect'
-import './evolution.css'
+import './history.css'
 
 const PortugalMap = lazy(() => import('./PortugalMap'))
 
@@ -132,7 +132,7 @@ const text = {
   },
 } as const
 
-interface EvolutionViewProps {
+interface HistoryViewProps {
   dataset: BeachDataset
   language: Language
   windUnit: WindUnit
@@ -185,10 +185,10 @@ function retainCache<T>(cache: Map<string, T>, key: string, value: T) {
   if (cache.size > 24) cache.delete(cache.keys().next().value!)
 }
 
-export default function EvolutionView({
+export default function HistoryView({
   dataset, language, windUnit, theme, initialTerritory,
   initialMapMetric, initialBeachId, onReturn, returnLabel,
-}: EvolutionViewProps) {
+}: HistoryViewProps) {
   const copy = getCopy(language)
   const t = text[language]
   const today = lisbonDate()
@@ -208,7 +208,7 @@ export default function EvolutionView({
   const [retry, setRetry] = useState(0)
   const [preset, setPreset] = useState<ViewPeriodPreset>('all')
   const [dateMode, setDateMode] = useState<'day' | 'week' | 'month' | 'custom'>('custom')
-  const [period, setPeriod] = useState<EvolutionPeriod | null>(null)
+  const [period, setPeriod] = useState<HistoryPeriod | null>(null)
   const [pendingStart, setPendingStart] = useState('')
   const [pendingEnd, setPendingEnd] = useState('')
   const [periodError, setPeriodError] = useState<'invalid' | 'empty' | null>(null)
@@ -252,7 +252,7 @@ export default function EvolutionView({
     setIndexLoading(true)
     setIndexError(false)
     loadTimelineIndex().then((index) => {
-      if (active) setIndexDates(availableEvolutionDates(index.dates))
+      if (active) setIndexDates(availableHistoryDates(index.dates))
     }).catch(() => {
       if (!active) return
       setIndexError(true)
@@ -266,7 +266,7 @@ export default function EvolutionView({
 
   useEffect(() => {
     if (indexLoading || indexError || preset !== 'all') return
-    setPeriod(resolveEvolutionPeriod(firstArchive, lastArchive, archiveDates))
+    setPeriod(resolveHistoryPeriod(firstArchive, lastArchive, archiveDates))
     setPendingStart(firstArchive)
     setPendingEnd(lastArchive)
   }, [archiveDates, firstArchive, indexError, indexLoading, lastArchive, preset])
@@ -324,11 +324,11 @@ export default function EvolutionView({
     const archiveEnd = period.end < lastArchive ? period.end : lastArchive
     const includeCandidates = calendarDayCount(period.start, archiveEnd) > 366
     if (scope === 'territory') {
-      loadBoundedEvolution({
+      loadBoundedHistory({
         start: period.start, end: archiveEnd, signal: controller.signal,
         cache: summaryCache.current, cacheKey: `${dataset.generatedAt}|${territory}|${includeCandidates ? 'candidates' : 'records'}`,
         load: async (start, end, signal) => {
-          const result = await loadEvolutionSummary(start, end, territory, signal, includeCandidates)
+          const result = await loadHistorySummary(start, end, territory, signal, includeCandidates)
           return {
             values: result.aggregates.filter((value) => value.date >= start && value.date <= end),
             records: result.records, recordCandidates: result.recordCandidates,
@@ -356,11 +356,11 @@ export default function EvolutionView({
         else complete()
       })
     } else {
-      loadBoundedEvolution({
+      loadBoundedHistory({
         start: period.start, end: archiveEnd, signal: controller.signal,
         cache: historyCache.current, cacheKey: `${dataset.generatedAt}|${idsKey}`,
         load: async (start, end, signal) => {
-          const result = await loadEvolutionBeachHistories(idsKey.split(','), start, end, signal)
+          const result = await loadHistoryBeachHistories(idsKey.split(','), start, end, signal)
           return new Map(result.histories.map((history) => [
             history.beachId,
             history.points.filter((point) => point.date >= start && point.date <= end && point.beachId === history.beachId)
@@ -401,9 +401,9 @@ export default function EvolutionView({
       return
     }
     setMapState({ key: mapKey, status: 'loading' })
-    loadEvolutionDate(mapDate, territory, controller.signal).then((result) => {
+    loadHistoryDate(mapDate, territory, controller.signal).then((result) => {
       if (controller.signal.aborted) return
-      if (result.date !== mapDate) throw new Error('Unexpected evolution date')
+      if (result.date !== mapDate) throw new Error('Unexpected history date')
       const points = result.points.filter((point) => point.date === mapDate)
       retainCache(mapCache.current, mapKey, points)
       setMapResult({ key: mapKey, points })
@@ -437,7 +437,7 @@ export default function EvolutionView({
   function applyPeriod(start: string, end: string, nextPreset: ViewPeriodPreset = preset) {
     const size = calendarDayCount(start, end)
     if (!size) { setPeriodError('invalid'); return }
-    const next = resolveEvolutionPeriod(start, end, archiveDates)
+    const next = resolveHistoryPeriod(start, end, archiveDates)
     setPendingStart(start)
     setPendingEnd(end)
     setPreset(nextPreset)
@@ -452,7 +452,7 @@ export default function EvolutionView({
       applyPeriod(firstArchive, lastArchive, 'all')
       return
     }
-    const bounds = evolutionPeriodBounds(nextPreset, anchor)
+    const bounds = historyPeriodBounds(nextPreset, anchor)
     if (bounds) applyPeriod(bounds.start, bounds.end, nextPreset)
   }
 
@@ -590,19 +590,19 @@ export default function EvolutionView({
     : t.noArchive
 
   return (
-    <main id="app-content" tabIndex={-1} className="evolution-page" aria-label={copy.evolutionTitle}
-      style={{ '--evo-metric': metricColor, '--evo-stats-height': `${Math.max(1, activeBeaches.length) * 44}px` } as CSSProperties}>
-      <div className="evo-content">
-        <section className="evo-controls" aria-label={t.chart}>
-          <div className="evo-comparison-row">
-            <button type="button" className="evo-return" onClick={onReturn} aria-label={returnLabel} title={returnLabel}><ArrowLeft size={18} aria-hidden="true" /></button>
+    <main id="app-content" tabIndex={-1} className="history-page" aria-label={copy.historyTitle}
+      style={{ '--history-metric': metricColor, '--history-stats-height': `${Math.max(1, activeBeaches.length) * 44}px` } as CSSProperties}>
+      <div className="history-content">
+        <section className="history-controls" aria-label={t.chart}>
+          <div className="history-comparison-row">
+            <button type="button" className="history-return" onClick={onReturn} aria-label={returnLabel} title={returnLabel}><ArrowLeft size={18} aria-hidden="true" /></button>
             <TerritorySelect value={territory} language={language} onChange={onTerritoryChange} />
-            <div className="evo-search" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setSearchOpen(false) }}>
+            <div className="history-search" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setSearchOpen(false) }}>
               <Search size={17} aria-hidden="true" />
               <input type="search" value={query} placeholder={t.chooseBeach}
                 aria-label={t.chooseBeach} role="combobox" aria-expanded={searchOpen}
-                aria-controls="evo-beach-results" aria-autocomplete="list" autoComplete="off"
-                aria-activedescendant={searchOpen && searchMatches[searchIndex] ? `evo-option-${searchMatches[searchIndex].id}` : undefined}
+                aria-controls="history-beach-results" aria-autocomplete="list" autoComplete="off"
+                aria-activedescendant={searchOpen && searchMatches[searchIndex] ? `history-option-${searchMatches[searchIndex].id}` : undefined}
                 onFocus={() => setSearchOpen(true)}
                 onClick={() => setSearchOpen(true)}
                 onChange={(event) => { setQuery(event.target.value); setSearchIndex(0); setSearchOpen(true) }}
@@ -612,13 +612,13 @@ export default function EvolutionView({
                   if (event.key === 'ArrowUp') { event.preventDefault(); setSearchIndex((index) => Math.max(0, index - 1)) }
                   if (event.key === 'Enter' && searchOpen && searchMatches[searchIndex]) { event.preventDefault(); addBeach(searchMatches[searchIndex].id) }
                 }} />
-              <span className="evo-selection-count" title={t.compareHint}>{selectedBeaches.length}/4</span>
+              <span className="history-selection-count" title={t.compareHint}>{selectedBeaches.length}/4</span>
               {searchOpen && (
-                <div className="evo-search-popover">
+                <div className="history-search-popover">
                   <p role="status">{selectedBeaches.length === 4 ? t.maxBeaches : t.compareHint}</p>
-                  <div className="evo-search-results" id="evo-beach-results" role="listbox" aria-label={t.addBeach}>
+                  <div className="history-search-results" id="history-beach-results" role="listbox" aria-label={t.addBeach}>
                     {searchMatches.map((beach, index) => (
-                      <button key={beach.id} id={`evo-option-${beach.id}`} role="option" type="button"
+                      <button key={beach.id} id={`history-option-${beach.id}`} role="option" type="button"
                         aria-selected={index === searchIndex} aria-disabled={selectedBeaches.length >= 4}
                         onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setSearchIndex(index)} onClick={() => addBeach(beach.id)}>
                         <strong>{beach.name}</strong><span>{beach.municipality} · {beach.district}</span>
@@ -629,33 +629,33 @@ export default function EvolutionView({
                 </div>
               )}
             </div>
-            <div className="evo-selected-beaches" aria-label={t.beaches}>
+            <div className="history-selected-beaches" aria-label={t.beaches}>
               {selectedBeaches.map((beach, index) => (
-                <span className="evo-chip" key={beach.id} style={{ '--evo-beach': beachColor(index) } as CSSProperties}>
+                <span className="history-chip" key={beach.id} style={{ '--history-beach': beachColor(index) } as CSSProperties}>
                   <i aria-hidden="true" /><span title={beach.name}>{uniqueShortBeachName(beach, dataset.beaches)}</span>
                   <button type="button" aria-label={`${t.remove} ${beach.name}`} onClick={() => setSelectedIds((ids) => ids.filter((id) => id !== beach.id))}><X size={14} /></button>
                 </span>
               ))}
-              {!selectedBeaches.length && <span className="evo-average-context" title={t.compareHint}><i aria-hidden="true" />{t.territoryAverage}</span>}
+              {!selectedBeaches.length && <span className="history-average-context" title={t.compareHint}><i aria-hidden="true" />{t.territoryAverage}</span>}
             </div>
           </div>
 
-          <div className="evo-toolbar">
-            <div className="evo-segment evo-metric-control" role="group" aria-label={t.metric}>
+          <div className="history-toolbar">
+            <div className="history-segment history-metric-control" role="group" aria-label={t.metric}>
               {([['water', Droplets], ['air', ThermometerSun], ['wind', Wind]] as const).map(([value, Icon]) => (
                 <button key={value} className={`metric-tab metric-tab--${value}${metric === value ? ' active' : ''}`} type="button" aria-pressed={metric === value} onClick={() => setMetric(value)}>
                   <Icon size={16} aria-hidden="true" />{t[value]}
                 </button>
               ))}
             </div>
-            <div className="evo-period">
-              <div className="evo-presets" role="group" aria-label={t.period}>
+            <div className="history-period">
+              <div className="history-presets" role="group" aria-label={t.period}>
                 {(['all', 'month'] as const).map((value) => (
                   <button key={value} type="button" aria-pressed={preset === value} disabled={indexLoading || indexError || !lastArchive}
                     title={value === 'all' ? t.fullArchive : undefined} onClick={() => choosePreset(value)}>{t[value]}</button>
                 ))}
               </div>
-              <details className="evo-date-control" ref={dateControl}
+              <details className="history-date-control" ref={dateControl}
                 onKeyDown={(event) => {
                   if (event.key === 'Escape' && dateControl.current) {
                     dateControl.current.open = false
@@ -673,12 +673,12 @@ export default function EvolutionView({
                   <span>{t.pickDate}</span>
                   <ChevronDown size={14} aria-hidden="true" />
                 </summary>
-                <div className="evo-date-popover">
-                  <div className="evo-date-heading">
+                <div className="history-date-popover">
+                  <div className="history-date-heading">
                     <strong>{t.pickDate}</strong>
-                    <button type="button" className="evo-icon-button" aria-label={t.close} onClick={() => { if (dateControl.current) { dateControl.current.open = false; dateControl.current.querySelector('summary')?.focus() } }}><X size={17} /></button>
+                    <button type="button" className="history-icon-button" aria-label={t.close} onClick={() => { if (dateControl.current) { dateControl.current.open = false; dateControl.current.querySelector('summary')?.focus() } }}><X size={17} /></button>
                   </div>
-                  <div className="evo-segment evo-date-modes" role="group" aria-label={t.period}>
+                  <div className="history-segment history-date-modes" role="group" aria-label={t.period}>
                     {(['day', 'week', 'month', 'custom'] as const).map((value) => (
                       <button type="button" key={value} aria-pressed={dateMode === value}
                         disabled={(value === 'week' || value === 'month') && (!lastArchive || indexError)} onClick={() => {
@@ -687,45 +687,45 @@ export default function EvolutionView({
                       }}>{t[value]}</button>
                     ))}
                   </div>
-                  <form className="evo-date-fields" onSubmit={(event) => {
+                  <form className="history-date-fields" onSubmit={(event) => {
                     event.preventDefault()
                     if (dateMode === 'custom') applyPeriod(pendingStart, pendingEnd, 'custom')
                     else choosePreset(dateMode, pendingStart)
                   }}>
-                    <label className="evo-field"><span>{dateMode === 'custom' ? t.from : t.day}</span>
+                    <label className="history-field"><span>{dateMode === 'custom' ? t.from : t.day}</span>
                       <input type="date" value={pendingStart} min={firstArchive} max={lastArchive}
                         required onChange={(event) => setPendingStart(event.target.value)} />
                     </label>
-                    {dateMode === 'custom' && <label className="evo-field"><span>{t.to}</span>
+                    {dateMode === 'custom' && <label className="history-field"><span>{t.to}</span>
                       <input type="date" value={pendingEnd} min={pendingStart || firstArchive} max={lastArchive} required onChange={(event) => setPendingEnd(event.target.value)} />
                     </label>}
-                    <button className="evo-primary" type="submit" disabled={periodInvalid || indexLoading || !archiveDates.length}>{t.apply}</button>
-                    {periodInvalid && pendingStart && pendingEnd && <p className="evo-note" role="status">{t.periodError}</p>}
+                    <button className="history-primary" type="submit" disabled={periodInvalid || indexLoading || !archiveDates.length}>{t.apply}</button>
+                    {periodInvalid && pendingStart && pendingEnd && <p className="history-note" role="status">{t.periodError}</p>}
                   </form>
-                  <p className="evo-note" title={t.rangeHint}>{indexError ? t.indexError : archiveLabel}</p>
+                  <p className="history-note" title={t.rangeHint}>{indexError ? t.indexError : archiveLabel}</p>
                 </div>
               </details>
             </div>
           </div>
         </section>
 
-        {indexError && <div className="evo-message" role="status">{t.indexError}<button type="button" onClick={() => setIndexRetry((value) => value + 1)}>{t.retry}</button></div>}
-        {periodError && <div className="evo-message" role="alert">{periodError === 'invalid' ? t.periodError : t.outsideArchive}</div>}
+        {indexError && <div className="history-message" role="status">{t.indexError}<button type="button" onClick={() => setIndexRetry((value) => value + 1)}>{t.retry}</button></div>}
+        {periodError && <div className="history-message" role="alert">{periodError === 'invalid' ? t.periodError : t.outsideArchive}</div>}
 
-        <div className="evo-workspace">
-          <section className="evo-map-section evo-card" aria-label={`${t.map}: ${territoryName}`}>
-            <header className="evo-map-heading">
+        <div className="history-workspace">
+          <section className="history-map-section history-card" aria-label={`${t.map}: ${territoryName}`}>
+            <header className="history-map-heading">
               <strong>{t.map}</strong>
-              <label className="evo-map-date"><span>{t.day}</span>
+              <label className="history-map-date"><span>{t.day}</span>
                 <input type="date" aria-label={t.mapDate} value={mapDate} min={period?.start} max={period?.end} disabled={!mapDates.length}
                   onChange={(event) => {
                     const index = mapDates.indexOf(event.target.value)
                     if (index >= 0) setMapIndex(index)
                   }} />
               </label>
-              {!singleDay && <button type="button" className="evo-text-button" disabled={!mapDate} onClick={() => choosePreset('day', mapDate)}>{t.viewDay}</button>}
+              {!singleDay && <button type="button" className="history-text-button" disabled={!mapDate} onClick={() => choosePreset('day', mapDate)}>{t.viewDay}</button>}
             </header>
-            <div className="evo-map-canvas">
+            <div className="history-map-canvas">
               <Suspense fallback={<div className="map-loading"><LoadingIndicator variant="compact" label={copy.loading} /></div>}>
                 <PortugalMap beaches={mapBeaches} districtWeather={[]} activeDate={mapDate} language={language} selectedId={recordBeachId || (scope === 'beaches' ? selectedIds[0] ?? '' : '')}
                   territory={territory} theme={theme} windUnit={windUnit} mapMetric={metric} isMobile={isMobile} clusterRadius={36} clusterBaseZoom={6} clusterZoomRate={1.65}
@@ -735,39 +735,39 @@ export default function EvolutionView({
               <MapLegend language={language} metric={metric} windUnit={windUnit} />
               {(indexLoading || mapLoading) && <div className="map-loading"><LoadingIndicator variant="compact" label={copy.loading} /></div>}
               {!indexLoading && !mapLoading && (!mapDates.length || !mapBeaches.length || mapError) && (
-                <div className="evo-map-notice" role={mapError ? 'alert' : 'status'}>
+                <div className="history-map-notice" role={mapError ? 'alert' : 'status'}>
                   <span>{mapError ? t.loadError : mapDates.length ? t.mapEmpty : preset === 'all' && !indexError ? t.noArchive : t.outsideArchive}</span>
-                  {mapError && <button className="evo-text-button" type="button" onClick={() => setRetry((value) => value + 1)}>{t.retry}</button>}
+                  {mapError && <button className="history-text-button" type="button" onClick={() => setRetry((value) => value + 1)}>{t.retry}</button>}
                 </div>
               )}
             </div>
-            <p className="evo-map-hint">{t.mapHint}</p>
+            <p className="history-map-hint">{t.mapHint}</p>
           </section>
 
-        <section className="evo-chart-card evo-card" aria-labelledby="evo-chart-title" aria-busy={loading}>
-          <header className="evo-chart-heading">
-            <h1 id="evo-chart-title">{t[metric]} <span>· {unit}</span></h1>
-            <span className="evo-chart-context">{periodLabel}</span>
+        <section className="history-chart-card history-card" aria-labelledby="history-chart-title" aria-busy={loading}>
+          <header className="history-chart-heading">
+            <h1 id="history-chart-title">{t[metric]} <span>· {unit}</span></h1>
+            <span className="history-chart-context">{periodLabel}</span>
           </header>
 
           {loading ? (
-            <div className="evo-chart-placeholder" role="status"><LoadingIndicator variant="compact" label={t.loading} /></div>
+            <div className="history-chart-placeholder" role="status"><LoadingIndicator variant="compact" label={t.loading} /></div>
           ) : loadError ? (
-            <div className="evo-chart-placeholder" role="alert"><p>{t.loadError}</p><button className="evo-primary" type="button" onClick={() => setRetry((value) => value + 1)}>{t.retry}</button></div>
+            <div className="history-chart-placeholder" role="alert"><p>{t.loadError}</p><button className="history-primary" type="button" onClick={() => setRetry((value) => value + 1)}>{t.retry}</button></div>
           ) : !hasDates ? (
-            <div className="evo-chart-placeholder"><CalendarDays size={26} aria-hidden="true" /><p>{indexError ? t.indexError : preset === 'all' ? t.noArchive : t.outsideArchive}</p></div>
+            <div className="history-chart-placeholder"><CalendarDays size={26} aria-hidden="true" /><p>{indexError ? t.indexError : preset === 'all' ? t.noArchive : t.outsideArchive}</p></div>
           ) : dailyAirFallback && !hiddenSeries ? (
-            <div className="evo-air-day">
+            <div className="history-air-day">
               <p>{t.airDaily}</p>
               {activeBeaches.map((beach, index) => {
                 const readings = summaries[index].values[0]
-                return <div className="evo-summary-row" key={beach.id}><strong><i style={{ background: series[index].color }} />{series[index].name}</strong><dl>
+                return <div className="history-summary-row" key={beach.id}><strong><i style={{ background: series[index].color }} />{series[index].name}</strong><dl>
                   {enabledStatistics.map((statistic) => <div key={statistic}><dt>{statisticLabels[statistic]}</dt><dd>{formatValue(readings?.[statistic])}</dd></div>)}
                 </dl></div>
               })}
             </div>
           ) : hasChart ? (
-            <div className="evo-chart" role="img" aria-label={`${t.chart}: ${scope === 'territory' ? territoryName : series.map((item) => item.name).join(', ')}, ${t[metric]}, ${periodLabel}`}>
+            <div className="history-chart" role="img" aria-label={`${t.chart}: ${scope === 'territory' ? territoryName : series.map((item) => item.name).join(', ')}, ${t[metric]}, ${periodLabel}`}>
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart accessibilityLayer data={displayedChart} margin={{ top: 14, right: 14, left: -12, bottom: 4 }}
                   onClick={(state) => {
@@ -783,7 +783,7 @@ export default function EvolutionView({
                     if (!active || !payload?.length) return null
                     const row = payload[0]?.payload as ChartPoint | undefined
                     if (!row) return null
-                    return <div className="evo-tooltip"><strong>{hourlyMode ? `${periodLabel} · ${label}` : formatDate(String(label), language, true)}</strong><small>{t.dayKindArchive} · {unit}</small>
+                    return <div className="history-tooltip"><strong>{hourlyMode ? `${periodLabel} · ${label}` : formatDate(String(label), language, true)}</strong><small>{t.dayKindArchive} · {unit}</small>
                       <table><thead><tr><th scope="col">{scope === 'territory' ? t.territoryAverage : t.beaches}</th>{enabledStatistics.map((statistic) => <th scope="col" key={statistic}>{statisticLabels[statistic]}</th>)}</tr></thead>
                         <tbody>{series.map((item) => <tr key={item.key}>
                           <th scope="row"><i style={{ background: item.color }} aria-hidden="true" />{item.name}</th>
@@ -818,21 +818,21 @@ export default function EvolutionView({
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
-          ) : <div className="evo-chart-placeholder" role="status"><p>{hiddenSeries ? t.hiddenSeries : t.noData}</p></div>}
+          ) : <div className="history-chart-placeholder" role="status"><p>{hiddenSeries ? t.hiddenSeries : t.noData}</p></div>}
 
           {hasDates && !loading && !loadError && (
             <>
               <ChartSeriesLegend language={language} visibility={visibility} statistics={statistics} showForecast={false}
                 help={`${readingHelp} ${t.legendHelp}`} onToggle={(key) => setVisibility((value) => ({ ...value, [key]: !value[key] }))} />
-              {hourlyMode && !dailyAirFallback && <p className="evo-reading">{t.hourlyKey}{hourlyUtc ? ' · UTC' : ''}</p>}
-              {missingHourlyAir.length > 0 && <p className="evo-note">
+              {hourlyMode && !dailyAirFallback && <p className="history-reading">{t.hourlyKey}{hourlyUtc ? ' · UTC' : ''}</p>}
+              {missingHourlyAir.length > 0 && <p className="history-note">
                 {language === 'pt' ? 'Sem ar horário' : 'No hourly air'}: {missingHourlyAir.map((beach) => uniqueShortBeachName(beach, dataset.beaches)).join(', ')}
               </p>}
-              {!hourlyMode && !hiddenSeries && <div className="evo-records" role="group" aria-label={t.periodSummary}
+              {!hourlyMode && !hiddenSeries && <div className="history-records" role="group" aria-label={t.periodSummary}
                 title={scope === 'territory' ? t.territorySummary : t.beachSummary}>
-                {summaries.map((summary) => <div className="evo-record" key={summary.id} role="group" aria-label={summary.name}
-                  data-comparison={summaries.length > 1} style={{ '--evo-record-colour': summary.color, '--evo-record-columns': enabledStatistics.length } as CSSProperties}>
-                  {summaries.length > 1 && <strong className="evo-record-name" title={summary.name}>
+                {summaries.map((summary) => <div className="history-record" key={summary.id} role="group" aria-label={summary.name}
+                  data-comparison={summaries.length > 1} style={{ '--history-record-colour': summary.color, '--history-record-columns': enabledStatistics.length } as CSSProperties}>
+                  {summaries.length > 1 && <strong className="history-record-name" title={summary.name}>
                     <i aria-hidden="true" />{summary.name}
                   </strong>}
                   {enabledStatistics.map((statistic) => {
@@ -843,37 +843,37 @@ export default function EvolutionView({
                     </>
                     const coverage = `${result.count}/${summaryDays} ${t.coverage}`
                     const recordDate = result.date
-                    return recordDate ? <button type="button" key={statistic} className="evo-record-value" data-statistic={statistic}
+                    return recordDate ? <button type="button" key={statistic} className="history-record-value" data-statistic={statistic}
                       title={`${t.recordDay} · ${formatDate(recordDate, language, true)} · ${coverage}`}
                       aria-label={`${summary.name} · ${statisticLabels[statistic]} ${formatValue(result.value)} · ${formatDate(recordDate, language, true)} · ${t.recordDay}`}
                       onClick={() => {
                         const index = mapDates.indexOf(recordDate)
                         if (index >= 0) setMapIndex(index)
-                      }}>{content}</button> : <div key={statistic} className="evo-record-value" data-statistic={statistic} title={coverage}>{content}</div>
+                      }}>{content}</button> : <div key={statistic} className="history-record-value" data-statistic={statistic} title={coverage}>{content}</div>
                   })}
-                  {summary.values.length < summaryDays && <small className="evo-record-coverage">{summary.values.length}/{summaryDays} {t.coverage}</small>}
+                  {summary.values.length < summaryDays && <small className="history-record-coverage">{summary.values.length}/{summaryDays} {t.coverage}</small>}
                 </div>)}
               </div>}
-              {partialError && <p className="evo-message" role="status">{t.partialError}<button type="button" onClick={() => setRetry((value) => value + 1)}>{t.retry}</button></p>}
+              {partialError && <p className="history-message" role="status">{t.partialError}<button type="button" onClick={() => setRetry((value) => value + 1)}>{t.retry}</button></p>}
             </>
           )}
-          {period && <footer className="evo-provenance" title={t.archiveNote} aria-label={`${visibleDays} ${t.days}. ${t.archiveNote}`}>
+          {period && <footer className="history-provenance" title={t.archiveNote} aria-label={`${visibleDays} ${t.days}. ${t.archiveNote}`}>
             <span>{visibleDays} {t.days} · {t.forecasts}</span>
             {period.clipped && <span>{t.clipped}</span>}
             {Boolean(period.missingDays) && <span>{period.missingDays} {t.gap}</span>}
           </footer>}
           {!singleDay && hasDates && !loading && !loadError && (visibility.max || visibility.min) && (
-            <section className="evo-location-records" aria-label={`${t.recordLocations} · ${t[metric]} · ${periodLabel}`}
+            <section className="history-location-records" aria-label={`${t.recordLocations} · ${t[metric]} · ${periodLabel}`}
               title={language === 'pt'
                 ? `Preferimos concelhos diferentes quando a diferença não ultrapassa ${HIGHLIGHT_SIMILARITY.temperatureCelsius} °C ou ${HIGHLIGHT_SIMILARITY.windKnots} kn.`
                 : `Different municipalities when values are within ${HIGHLIGHT_SIMILARITY.temperatureCelsius} °C or ${HIGHLIGHT_SIMILARITY.windKnots} kn.`}>
               {rankedRecords ? (['max', 'min'] as const).filter((direction) => visibility[direction]).map((direction) => (
-                <div className="evo-location-column" key={direction}>
+                <div className="history-location-column" key={direction}>
                   <h2>{direction === 'max' ? t.highest : t.lowest}<span>{unit}</span></h2>
                   {rankedRecords[metric][direction].length ? rankedRecords[metric][direction].map((record) => {
                     const beach = dataset.beaches.find((item) => item.id === record.beachId)
                     const name = beach ? uniqueShortBeachName(beach, dataset.beaches) : `${copy.beach} ${record.beachId}`
-                    return <button type="button" key={record.beachId} className="evo-location-record"
+                    return <button type="button" key={record.beachId} className="history-location-record"
                       title={`${beach?.name ?? name} · ${beach?.municipality ?? ''} · ${beach?.district ?? ''} · ${formatDate(record.date, language, true)} · ${t.recordBeach}`}
                       aria-label={`${beach?.name ?? name} · ${beach?.municipality ?? ''} · ${beach?.district ?? ''} · ${direction === 'max' ? t.maximum : t.minimum} ${formatValue(record.value)} · ${formatDate(record.date, language, true)} · ${t.recordBeach}`}
                       onClick={() => {
@@ -881,7 +881,7 @@ export default function EvolutionView({
                         if (index >= 0) {
                           setMapIndex(index)
                           setRecordFocus({ key: dataKey, metric, beachId: record.beachId })
-                          if (isMobile) document.querySelector('.evo-map-section')?.scrollIntoView({ block: 'nearest' })
+                          if (isMobile) document.querySelector('.history-map-section')?.scrollIntoView({ block: 'nearest' })
                         }
                       }}>
                       <span><strong>{beach?.name ?? name}</strong>
@@ -889,19 +889,19 @@ export default function EvolutionView({
                         <time dateTime={record.date}>{formatDate(record.date, language)}</time></span>
                       <b>{displayValue(record.value).toFixed(1)}</b>
                     </button>
-                  }) : <p className="evo-note">{t.noData}</p>}
+                  }) : <p className="history-note">{t.noData}</p>}
                 </div>
-              )) : <p className="evo-note">{t.recordsUnavailable}</p>}
+              )) : <p className="history-note">{t.recordsUnavailable}</p>}
             </section>
           )}
         </section>
         </div>
 
         {hourlyMode && hasChart && !loading && !loadError && (
-          <details className="evo-hourly evo-card">
+          <details className="history-hourly history-card">
             <summary>{t.hourly}{metric === 'wind' ? ` · ${t.windDirection}` : ''}<ChevronDown size={18} aria-hidden="true" /></summary>
-            {metric === 'wind' && <p className="evo-note">{t.windDirectionNote}</p>}
-            <div className="evo-hourly-scroll" tabIndex={0} role="region" aria-label={t.hourly}>
+            {metric === 'wind' && <p className="history-note">{t.windDirectionNote}</p>}
+            <div className="history-hourly-scroll" tabIndex={0} role="region" aria-label={t.hourly}>
               <table><caption>{periodLabel} · {unit}{hourlyUtc ? ' · UTC' : ''}</caption><thead><tr><th scope="col">{t.time}</th>{activeBeaches.map((beach, index) => <th key={beach.id} scope="col">{series[index].name}</th>)}</tr></thead>
                 <tbody>{Array.from({ length: 11 }, (_, index) => index + 8).map((hour) => <tr key={hour}><th scope="row">{`${hour.toString().padStart(2, '0')}:00`}</th>
                   {activeBeaches.map((beach) => {
@@ -910,7 +910,7 @@ export default function EvolutionView({
                     const direction = reading?.windDirection
                     const degrees = windDirectionDegrees(direction)
                     return <td key={beach.id}>{value === undefined ? '—' : displayValue(value).toFixed(1)}
-                      {metric === 'wind' && direction && <span className="evo-direction" title={`${t.windDirection}: ${direction}`}>{direction}{degrees !== null && <ArrowUp size={13} aria-hidden="true" style={{ transform: `rotate(${degrees + 180}deg)` }} />}</span>}
+                      {metric === 'wind' && direction && <span className="history-direction" title={`${t.windDirection}: ${direction}`}>{direction}{degrees !== null && <ArrowUp size={13} aria-hidden="true" style={{ transform: `rotate(${degrees + 180}deg)` }} />}</span>}
                     </td>
                   })}
                 </tr>)}</tbody>
