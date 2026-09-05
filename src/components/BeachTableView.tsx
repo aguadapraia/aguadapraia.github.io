@@ -31,9 +31,9 @@ interface BeachTableViewProps {
 
 const TABLE_COPY = {
   pt: {
-    searchPlaceholder: 'Pesquisar por praia, distrito ou concelho',
-    allDistricts: 'Todos os distritos',
-    allMunicipalities: 'Todos os concelhos',
+    searchPlaceholder: 'Praia, distrito ou concelho',
+    allDistricts: 'Distrito: todos',
+    allMunicipalities: 'Concelho: todos',
     noDate: 'Data indisponível',
     count: (shown: number, total: number) => shown === total ? `${total} praias` : `${shown} / ${total} praias`,
     water: 'Água',
@@ -62,9 +62,9 @@ const TABLE_COPY = {
     noBeachesHint: 'Tenta novamente mais tarde.',
   },
   en: {
-    searchPlaceholder: 'Search by beach, district or municipality',
-    allDistricts: 'All districts',
-    allMunicipalities: 'All municipalities',
+    searchPlaceholder: 'Beach, district or municipality',
+    allDistricts: 'District: all',
+    allMunicipalities: 'Municipality: all',
     noDate: 'Date unavailable',
     count: (shown: number, total: number) => shown === total ? `${total} beaches` : `${shown} / ${total} beaches`,
     water: 'Water',
@@ -203,24 +203,28 @@ export default function BeachTableView({
               </button>
             )}
           </div>
-          {territoryControl && <div className="beach-table-territory">{territoryControl}</div>}
-          <label className="beach-table-field">
-            <span className="sr-only">{copy.district}</span>
-            <select value={district} onChange={(event) => setLocation({ district: event.target.value, municipality: '' })}>
-              <option value="">{text.allDistricts}</option>
-              {districts.map((value) => <option key={value} value={value}>{value}</option>)}
-            </select>
-          </label>
-          <label className="beach-table-field">
-            <span className="sr-only">{copy.municipality}</span>
-            <select value={municipality} onChange={(event) => setLocation({ district, municipality: event.target.value })}>
-              <option value="">{text.allMunicipalities}</option>
-              {municipalities.map((value) => <option key={value} value={value}>{value}</option>)}
-            </select>
-          </label>
-          <span className="beach-table-count" role="status" aria-live="polite" aria-atomic="true">{text.count(sorted.length, beaches.length)}</span>
-          {hasFilters && <button type="button" className="beach-table-reset" onClick={clearAll} aria-label={copy.clearFilters} title={copy.clearFilters}><X size={17} aria-hidden="true" /></button>}
-          {forecastControl && <div className="beach-table-forecast">{forecastControl}</div>}
+          <div className="beach-table-summary">
+            <span className="beach-table-count" role="status" aria-live="polite" aria-atomic="true">{text.count(sorted.length, beaches.length)}</span>
+            {hasFilters && <button type="button" className="beach-table-reset" onClick={clearAll} aria-label={copy.clearFilters} title={copy.clearFilters}><X size={17} aria-hidden="true" /></button>}
+          </div>
+          <div className="beach-table-filters">
+            {territoryControl && <div className="beach-table-territory">{territoryControl}</div>}
+            {forecastControl && <div className="beach-table-forecast">{forecastControl}</div>}
+            <label className="beach-table-field">
+              <span className="sr-only">{copy.district}</span>
+              <select value={district} onChange={(event) => setLocation({ district: event.target.value, municipality: '' })}>
+                <option value="">{text.allDistricts}</option>
+                {districts.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </label>
+            <label className="beach-table-field">
+              <span className="sr-only">{copy.municipality}</span>
+              <select value={municipality} onChange={(event) => setLocation({ district, municipality: event.target.value })}>
+                <option value="">{text.allMunicipalities}</option>
+                {municipalities.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </label>
+          </div>
         </div>
 
         {sorted.length === 0 ? (

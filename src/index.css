@@ -156,39 +156,6 @@ button {
   color: inherit;
 }
 
-.seg-control {
-  display: inline-flex;
-  gap: 3px;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--cp-surface-soft);
-}
-
-.seg-control button {
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  cursor: pointer;
-  font-size: 0.72rem;
-  font-weight: 700;
-  white-space: nowrap;
-  transition: background 120ms, color 120ms;
-}
-
-.seg-control button[aria-selected='true'],
-.seg-control button.active {
-  border-color: color-mix(in srgb, var(--control-accent, var(--cp-link)) 35%, var(--cp-border));
-  background: var(--cp-panel-strong);
-  color: var(--control-accent, var(--cp-link));
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--cp-text) 8%, transparent);
-}
-
 .metric-tab--water {
   --control-accent: var(--metric-water);
 }
@@ -264,7 +231,6 @@ button {
 
 .site-header,
 .brand,
-.date-switch,
 .attribution-bar,
 .attribution-source {
   display: flex;
@@ -292,14 +258,6 @@ button {
   display: block;
   flex: 0 0 auto;
   color: var(--cp-link);
-}
-
-.date-switch::-webkit-scrollbar {
-  display: none;
-}
-
-.date-switch {
-  gap: 4px;
 }
 
 .territory-select-wrapper {
@@ -338,16 +296,6 @@ button {
 .territory-select-wrapper--elevated select {
   min-height: 40px;
   box-shadow: var(--cp-shadow);
-}
-
-.date-switch button {
-  min-height: 36px;
-  white-space: nowrap;
-}
-
-.date-switch button.active {
-  background: var(--cp-link);
-  color: var(--cp-accent-fg);
 }
 
 .map-stage {
@@ -728,6 +676,8 @@ button {
   border-top: 1px solid var(--cp-border);
   background: var(--cp-bg-elevated);
   font-size: 0.68rem;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 .attribution-source {
@@ -792,22 +742,6 @@ button {
     font-size: 0.7rem;
   }
 
-  .date-switch {
-    min-width: max-content;
-    gap: 3px;
-  }
-
-  .date-switch button {
-    min-height: 34px;
-    gap: 3px;
-    padding-inline: 8px;
-    font-size: 0.65rem;
-  }
-
-  .date-switch button svg {
-    width: 13px;
-  }
-
   .details-sheet {
     top: auto;
     left: 6px;
@@ -848,10 +782,6 @@ button {
 @media (max-width: 520px) {
   .brand > span:last-child {
     display: none;
-  }
-
-  .date-switch {
-    overflow-x: auto;
   }
 
   .legend-scale {
@@ -1061,18 +991,4 @@ button {
 .attribution-github:hover {
   color: var(--cp-text);
   text-decoration: underline;
-}
-
-@media (max-width: 360px) {
-  .attribution-bar {
-    flex-wrap: wrap;
-    height: auto;
-    min-height: 32px;
-    padding-block: 4px;
-  }
-
-  .attribution-credit {
-    flex-basis: 100%;
-    margin-left: 0;
-  }
 }

@@ -5,7 +5,6 @@ import { getCopy, type Language } from '../i18n'
 import { forecastForDate } from '../lib/beach-discovery'
 import { lisbonDate } from '../lib/date-classification'
 import { availableEvolutionDates, evolutionPeriodBounds } from '../lib/evolution-period'
-import { getRelativeLabel } from '../lib/relative-date'
 import { convertWind, formatDistance, type WindUnit } from '../lib/units'
 import type { BeachViewModel, HistoryPoint, MapMetric } from '../types'
 import BeachDayHours from './BeachDayHours'
@@ -37,7 +36,6 @@ export default function BeachDetails({
   const [error, setError] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const forecast = forecastForDate(beach, date)
-  const dayLabel = getRelativeLabel(date, dates, language)
   const windLabel = windUnit === 'kmh' ? 'km/h' : 'kn'
 
   useEffect(() => {
@@ -65,10 +63,6 @@ export default function BeachDetails({
 
   return (
     <section className="beach-details" aria-labelledby="beach-detail-title">
-      <div className="beach-title">
-        <div><h2 id="beach-detail-title" tabIndex={-1}>{beach.name}</h2><small>{dayLabel.compactDate}</small></div>
-        <span>{beach.municipality} · {beach.district}</span>
-      </div>
       {nearbyBeaches.length > 1 && onSelectNearby && <label className="beach-nearby">
         <span>{pt ? 'Praias próximas' : 'Nearby beaches'}</span>
         <select value={beach.id} onChange={(event) => {

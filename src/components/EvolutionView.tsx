@@ -477,7 +477,7 @@ export default function EvolutionView({
   const unit = metric === 'wind' ? windUnit === 'kmh' ? 'km/h' : 'kn' : '°C'
   const displayValue = (value: number) => metric === 'wind' ? convertWind(value, windUnit) : value
   const formatValue = (value: number | undefined) => value === undefined ? '—' : `${displayValue(value).toFixed(1)} ${unit}`
-  const territoryName = territory === 'all' ? copy.portugalAndIslands : territory === 'mainland' ? copy.mainland : territory === 'azores' ? copy.azores : copy.madeira
+  const territoryName = territory === 'all' ? copy.portugal : territory === 'mainland' ? copy.mainland : territory === 'azores' ? copy.azores : copy.madeira
   const series: Series[] = scope === 'territory'
     ? [{ key: 'territory', name: territoryName, color: metricColor }]
     : activeBeaches.map((beach, index) => ({ key: `beach${index}`, name: uniqueShortBeachName(beach, dataset.beaches), color: beachColor(index) }))

@@ -35,7 +35,7 @@ export default function TerritorySelect({
           }
         }}
       >
-        <option value="all">{copy.portugalAndIslands}</option>
+        <option value="all">{copy.portugal}</option>
         <option value="mainland">{copy.mainland}</option>
         <option value="madeira">{copy.madeira}</option>
         <option value="azores">{copy.azores}</option>

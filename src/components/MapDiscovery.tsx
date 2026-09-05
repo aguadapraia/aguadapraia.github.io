@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Droplets, LocateFixed, Search, ThermometerSun, Wind, X } from 'lucide-react'
+import { ChevronDown, Droplets, LocateFixed, Search, ThermometerSun, Wind, X } from 'lucide-react'
+import BeachDetailPanel from './BeachDetailPanel'
 import { getCopy, type Language } from '../i18n'
 import { forecastForDate, forecastHighlights, nearestBeach } from '../lib/beach-discovery'
 import { normalizeBeachSearch } from '../lib/beach-search'
@@ -58,6 +59,7 @@ export default function MapDiscovery({
     { value: 'air', label: copy.air, icon: ThermometerSun },
     { value: 'wind', label: copy.wind, icon: Wind },
   ] as const
+  const MetricIcon = metric === 'water' ? Droplets : metric === 'air' ? ThermometerSun : Wind
 
   function chooseBeach(beach: BeachViewModel) {
     requestId.current += 1
@@ -124,7 +126,8 @@ export default function MapDiscovery({
             aria-controls="discovery-results"
             aria-activedescendant={expanded && matches[activeResult] ? `discovery-result-${activeResult}` : undefined}
             aria-label={copy.search}
-            placeholder={pt ? 'Procura uma praia ou escolhe no mapa' : 'Find a beach or select on the map'}
+            placeholder={pt ? 'Procura uma praia' : 'Find a beach'}
+            title={pt ? 'Procura uma praia ou escolhe no mapa' : 'Find a beach or select on the map'}
             value={query}
             onFocus={(event) => {
               if (selectedBeach && query === selectedBeach.name) event.currentTarget.select()
@@ -177,11 +180,25 @@ export default function MapDiscovery({
             : 'No matching beach. Try a municipality or district.'}</p>}
         </div>}
       </div>
-      {controls}
+      <label className={`beach-map-metric metric-tab--${metric}`} title={pt ? 'Ver o mapa por' : 'View the map by'}>
+        <MetricIcon size={15} aria-hidden="true" />
+        <select value={metric} aria-label={pt ? 'Ver o mapa por' : 'View the map by'}
+          onChange={(event) => {
+            const option = metricOptions.find((item) => item.value === event.target.value)
+            if (option) onMetricChange(option.value)
+          }}>
+          {metricOptions.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+        </select>
+        <ChevronDown size={12} aria-hidden="true" />
+      </label>
+      <div className="beach-forecast-toolbar">{controls}</div>
       {locationMessage && <p role="status" className="beach-location-message">{locationMessage}</p>}
       </div>
-      <div className="beach-sidebar-body" ref={bodyRef}>
-      {selectedBeach ? children : <>
+      {selectedBeach ? <BeachDetailPanel key={selectedBeach.id} name={selectedBeach.name}
+        location={`${selectedBeach.municipality} · ${selectedBeach.district}`} date={activeDate}
+        language={language} scrollRef={bodyRef}>
+        {children}
+      </BeachDetailPanel> : <div className="beach-sidebar-body" ref={bodyRef}>
       <section className="beach-highlights" aria-label={pt ? 'Destaques do dia' : 'Daily highlights'}>
         <h2 title={pt
           ? 'Concelhos distintos; repetimos um concelho apenas com mais de 1 °C de diferença. O catálogo não inclui freguesias.'
@@ -199,30 +216,15 @@ export default function MapDiscovery({
                 <span className="highlight-mobile-label" title={heading}>{label}</span>
               </h3>
               {items.map((item) => <button type="button" key={item.beach.id}
-                title={`${item.beach.name} · ${item.beach.municipality}`} onClick={() => chooseBeach(item.beach)}>
+                title={`${heading} · ${item.beach.name} · ${item.beach.municipality}`} onClick={() => chooseBeach(item.beach)}>
                 <span><strong>{item.beach.name}</strong><small>{item.beach.municipality}</small></span>
-                <b>{value === 'wind' ? formatWind(item.value, windUnit) : `${item.value.toFixed(value === 'water' ? 1 : 0)}°`}</b>
+                <b><Icon className="highlight-value-icon" size={14} aria-hidden="true" />{value === 'wind' ? formatWind(item.value, windUnit) : `${item.value.toFixed(value === 'water' ? 1 : 0)}°`}</b>
               </button>)}
             </section>
           })}
         </div>
       </section>
-
-      <div className="beach-discovery-tools">
-        <div className="beach-map-metric">
-          <span>{pt ? 'Ver o mapa por' : 'View the map by'}</span>
-          <div className="seg-control" role="group" aria-label={copy.mapMetric}>
-            {metricOptions.map(({ value, label, icon: Icon }) => (
-              <button key={value} type="button" aria-pressed={metric === value}
-                className={`metric-tab--${value} ${metric === value ? 'active' : ''}`}
-                title={value === 'wind' ? (pt ? 'Média das 08:00 às 18:00' : 'Average from 08:00 to 18:00') : (pt ? 'Máxima diária' : 'Daily maximum')}
-                onClick={() => onMetricChange(value)}><Icon size={16} />{label}</button>
-            ))}
-          </div>
-        </div>
-      </div>
-      </>}
-      </div>
+      </div>}
     </section>
   )
 }

@@ -36,6 +36,9 @@
   padding: 12px;
 }
 
+.beach-table-summary { display: flex; align-items: center; gap: 4px; }
+.beach-table-filters { display: flex; align-items: center; flex: 2 1 660px; gap: 10px; min-width: 0; }
+
 .beach-table-search {
   display: flex;
   align-items: center;
@@ -539,21 +542,14 @@
 
 @media (max-width: 960px) {
   .beach-table-toolbar {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .beach-table-search {
-    flex-basis: 100%;
-  }
-
-  .beach-table-field {
-    flex: 1 1 160px;
-  }
-  .beach-table-territory { flex: 1 1 160px; }
-
-  .beach-table-forecast {
-    flex-basis: 220px;
-    margin-left: auto;
+  .beach-table-filters {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -579,23 +575,21 @@
     padding: 10px 12px 16px;
   }
 
-  .beach-table-search input,
-  .beach-table-field select,
-  .beach-table-forecast select {
-    font-size: 13px;
-  }
-
-  .beach-table-search,
-  .beach-table-field select,
-  .beach-table-forecast select,
+  .beach-table-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .beach-table-toolbar { gap: 6px; padding: 8px; }
+  .beach-table-search { height: 38px; padding-left: 8px; gap: 6px; }
+  .beach-table-search input { font-size: 12px; }
+  .beach-table-count { font-size: 10px; }
+  .beach-table-filters select { min-height: 36px; height: 36px; font-size: 12px; }
   .beach-table-actions button,
   .beach-table-reset {
     min-height: 44px;
   }
+  .beach-table-summary .beach-table-reset { width: 28px; height: 36px; min-height: 36px; }
 
   .beach-table-search button {
-    width: 44px;
-    height: 44px;
+    width: 32px;
+    height: 36px;
   }
 
   .beach-table-name-button {
@@ -618,23 +612,6 @@
 @media (max-width: 520px) {
   .btv-root.beach-table {
     padding: 8px;
-  }
-
-  .beach-table-toolbar {
-    gap: 6px 8px;
-    padding: 10px;
-  }
-
-  .beach-table-field {
-    flex: 1 1 calc(50% - 4px);
-  }
-
-  .beach-table-count {
-    margin-left: 0;
-  }
-
-  .beach-table-forecast {
-    flex: 1 1 170px;
   }
 
   .beach-table-name-button strong {

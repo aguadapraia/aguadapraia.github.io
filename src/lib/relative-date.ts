@@ -6,7 +6,7 @@ interface RelativeLabel {
   compactDate: string
 }
 
-function formatCompactDate(date: string, language: Language) {
+export function formatCompactDate(date: string, language: Language) {
   return new Intl.DateTimeFormat(language === 'pt' ? 'pt-PT' : 'en-GB', {
     day: '2-digit',
     month: 'short',

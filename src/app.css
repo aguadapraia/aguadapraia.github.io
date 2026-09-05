@@ -41,35 +41,22 @@
 .beach-navigation a:not([aria-current]):hover { color: var(--cp-text); border-bottom-color: var(--cp-border-strong); }
 .beach-app .beach-forecast-toolbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+  flex-wrap: wrap;
+  grid-column: 1 / -1;
 }
-.beach-forecast-toolbar .territory-select-wrapper { min-width: 0; flex: 1; }
-.beach-forecast-toolbar .territory-select-wrapper select { width: 100%; min-height: 34px; height: 34px; font-size: 12px; box-shadow: none; }
-.beach-forecast-toolbar .date-switch { display: flex; min-width: 0; gap: 2px; padding: 2px; background: var(--cp-surface-soft); border-radius: 8px; }
-.beach-forecast-toolbar .date-switch button {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  min-height: 30px;
-  min-width: 0;
-  padding: 3px 10px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--cp-text-muted);
-  font-size: 12px;
-  cursor: pointer;
-}
-.beach-forecast-toolbar .date-switch button.active { background: var(--cp-accent); color: var(--cp-accent-fg); font-weight: 650; }
+.beach-forecast-toolbar .territory-select-wrapper { flex: 0 0 auto; }
+.beach-forecast-toolbar .territory-select-wrapper select { min-height: 36px; padding-inline: 7px 22px; font-size: 11px; box-shadow: none; }
+.beach-forecast-toolbar .territory-select-chevron { right: 6px; }
+.date-switch { display: flex; flex: 1; gap: 2px; padding: 2px; border-radius: 8px; background: var(--cp-surface-soft); }
+.date-switch button { flex: 1; min-height: 32px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--cp-text-muted); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.date-switch button.active { background: var(--cp-accent); color: var(--cp-accent-fg); font-weight: 600; }
 .forecast-select { min-height: 40px; border: 1px solid var(--cp-border); border-radius: 8px; background: var(--cp-surface); color: var(--cp-text); padding: 6px 10px; font-size: 13px; }
 .beach-app .beach-map-layout { display: grid; grid-template-columns: 400px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
 .beach-map-canvas { position: relative; grid-column: 2; grid-row: 1; min-width: 0; min-height: 0; background: var(--cp-ocean); }
-.beach-app .water-temperature-legend { box-shadow: none; border: 1px solid var(--cp-border); font-size: 11px; }
+.beach-app .water-temperature-legend { padding: 5px 8px; box-shadow: none; border: 1px solid var(--cp-border); border-radius: 8px; font-size: 11px; white-space: nowrap; }
 .beach-app .water-temperature-legend b,
 .beach-app .map-legend--wind > span { font-size: 11px; }
 .svg-map-shell[data-metric='wind'],
@@ -98,7 +85,7 @@
   border-right: 1px solid var(--cp-border);
   background: var(--cp-surface);
 }
-.beach-sidebar-header { position: relative; z-index: 10; flex: 0 0 auto; display: grid; gap: 10px; padding: 16px; border-bottom: 1px solid var(--cp-border); background: var(--cp-surface); }
+.beach-sidebar-header { position: relative; z-index: 10; flex: 0 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 16px; border-bottom: 1px solid var(--cp-border); background: var(--cp-surface); }
 .beach-sidebar-body { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 16px; display: flex; flex-direction: column; gap: 24px; }
 .beach-discovery-search { position: relative; z-index: 6; }
 .beach-search-field {
@@ -141,7 +128,7 @@
 .beach-search-results b { color: var(--metric-water); font-size: 15px; white-space: nowrap; }
 .beach-highlights h2 { display: flex; justify-content: space-between; align-items: center; margin: 0 0 12px; font-size: 13px; font-weight: 600; }
 .beach-highlights h2 span { color: var(--cp-text-muted); font-size: 11px; font-weight: 400; }
-.highlight-mobile-label { display: none; }
+.highlight-mobile-label, .highlight-value-icon { display: none; }
 .beach-highlight-cards { display: grid; gap: 8px; }
 .beach-highlight-group { border: 1px solid var(--cp-border); border-radius: 10px; padding: 8px 12px 2px; }
 .beach-highlight-group h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 3px; color: var(--cp-text-muted); font-size: 11px; font-weight: 500; }
@@ -157,15 +144,19 @@
 .beach-highlight-cards small { margin-top: 3px; color: var(--cp-text-muted); font-size: 11px; }
 .beach-highlight-cards strong { font-size: 13px; font-weight: 600; }
 .beach-highlight-cards b { color: var(--highlight-colour); font-size: 20px; font-weight: 650; white-space: nowrap; letter-spacing: -.5px; }
-.beach-discovery-tools { display: grid; gap: 20px; }
-.beach-map-metric { display: grid; gap: 10px; }
-.beach-map-metric > span { font-size: 13px; font-weight: 600; }
-.beach-map-metric .seg-control { width: 100%; }
-.beach-map-metric .seg-control button { flex: 1; min-height: 36px; font-size: 13px; font-weight: 600; }
+.beach-map-metric { position: relative; display: flex; align-items: center; color: var(--control-accent); }
+.beach-map-metric select { width: 100px; height: 44px; appearance: none; padding: 0 20px 0 28px; border: 1px solid color-mix(in srgb, var(--control-accent) 35%, var(--cp-border)); border-radius: 10px; background: var(--cp-surface); color: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.beach-map-metric option { color: var(--cp-text); background: var(--cp-surface); }
+.beach-map-metric > svg { position: absolute; left: 8px; pointer-events: none; }
+.beach-map-metric > svg:last-child { left: auto; right: 6px; }
 .metric-tab--water svg { color: var(--metric-water); }
 .metric-tab--air svg { color: var(--metric-air); }
 .metric-tab--wind svg { color: var(--metric-wind); }
-.beach-location-message { margin: 0; color: var(--cp-text-muted); font-size: 12px; line-height: 1.5; }
+.beach-location-message { grid-column: 1 / -1; margin: 0; color: var(--cp-text-muted); font-size: 12px; line-height: 1.5; }
+.beach-detail-panel { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
+.beach-panel-header { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; padding: 16px 16px 0; }
+.beach-panel-header .beach-title { flex: 1; min-width: 0; }
+.beach-sheet-handle, .beach-sheet-grip { display: none; }
 .beach-details {
   display: grid;
   width: 100%;
@@ -246,46 +237,53 @@
   .beach-navigation { justify-content: center; gap: 12px; }
   .beach-navigation a { flex: 1; gap: 5px; min-height: 44px; padding: 0 2px; font-size: 12px; }
   .beach-navigation a svg { width: 15px; height: 15px; }
-  .beach-app .beach-forecast-toolbar { gap: 8px; justify-content: space-between; }
-  .beach-forecast-toolbar .territory-select-wrapper { flex: 1; min-width: 0; }
-  .beach-forecast-toolbar .territory-select-wrapper select { max-width: 100%; width: 100%; min-height: 32px; height: 32px; padding-left: 8px; font-size: 11px; }
-  .beach-forecast-toolbar .date-switch { flex: 0 0 auto; gap: 2px; }
-  .beach-forecast-toolbar .date-switch button { min-width: 0; min-height: 32px; padding: 4px 7px; font-size: 11px; }
+  .beach-app .beach-forecast-toolbar { gap: 4px; }
+  .beach-forecast-toolbar .territory-select-wrapper select { padding-inline: 6px 20px; }
+  .date-switch button { padding-inline: 7px; font-size: 11px; }
+  .beach-map-metric select { width: 94px; height: 40px; font-size: 11px; }
   .beach-app .beach-map-layout { display: flex; flex-direction: column; }
   .beach-discovery { position: static; flex: 0 0 auto; border-right: 0; border-bottom: 1px solid var(--cp-border); }
-  .beach-sidebar-header { padding: 10px; gap: 8px; }
-  .beach-sidebar-body { overflow: visible; padding: 10px; gap: 10px; }
+  .beach-sidebar-header { padding: 8px; gap: 6px; }
+  .beach-sidebar-body { overflow: visible; padding: 6px 8px; gap: 6px; }
   .beach-discovery:not(.has-selection) .beach-sidebar-body { max-height: max(100px, calc(100dvh - 350px)); overflow-y: auto; }
-  .beach-discovery.has-selection .beach-sidebar-body { position: absolute; inset: auto 0 0; z-index: 8; max-height: calc(100% - 146px); overflow-y: auto; overscroll-behavior: contain; padding: 14px; background: var(--cp-surface); border-top: 1px solid var(--cp-border); border-radius: 14px 14px 0 0; box-shadow: var(--cp-shadow); }
+  .beach-detail-panel { position: absolute; inset: auto 0 0; z-index: 8; height: 56%; max-height: 100%; background: var(--cp-surface); border-top: 1px solid var(--cp-border); border-radius: 14px 14px 0 0; box-shadow: var(--cp-shadow); transition: height 180ms ease-out; }
+  .beach-detail-panel[data-dragging='true'] { transition: none; }
+  .beach-detail-panel .beach-sidebar-body { overflow-y: auto; overscroll-behavior: contain; padding: 0 12px 12px; }
+  .beach-detail-panel[data-collapsed='true'] .beach-sidebar-body { flex: 0 0 0; padding-block: 0; overflow: hidden; visibility: hidden; }
+  .beach-panel-header { position: relative; min-height: 64px; padding: 14px 8px 8px 12px; cursor: ns-resize; touch-action: none; user-select: none; }
+  .beach-sheet-grip { display: block; position: absolute; top: 5px; left: calc(50% - 17px); width: 34px; height: 4px; border-radius: 4px; background: var(--cp-border-strong); }
+  .beach-sheet-handle { display: grid; place-items: center; flex: 0 0 36px; min-height: 44px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--cp-text-muted); cursor: pointer; }
+  .beach-detail-panel[data-collapsed='true'] .beach-panel-header { height: 64px; }
+  .beach-detail-panel[data-collapsed='true'] .beach-title > span { display: none; }
+  .beach-detail-panel[data-collapsed='true'] .beach-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; font-size: 16px; }
+  .beach-map-layout:has(.beach-detail-panel) .svg-map-controls { top: 8px; bottom: auto; }
+  .beach-map-layout:has(.beach-detail-panel[data-collapsed='true']) .water-temperature-legend { bottom: 72px; }
   .beach-search-field { min-height: 40px; }
   .beach-search-field input { height: 38px; font-size: 12px; }
   .beach-search-results { max-height: 45dvh; }
-  .beach-highlights h2 { display: none; }
-  .beach-highlights { order: 2; }
+  .beach-highlights h2, .beach-highlight-group h3 { display: none; }
   .beach-highlight-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-  .beach-highlight-group { min-width: 0; padding: 6px 7px 2px; }
-  .beach-highlight-group h3 { display: flex; gap: 3px; min-height: 0; font-size: 10px; line-height: 1.3; }
+  .beach-highlight-group { min-width: 0; padding: 0 6px; }
   .highlight-desktop-label { display: none; }
   .highlight-mobile-label { display: inline; }
-  .beach-highlight-group h3 svg { display: inline; width: 12px; height: 12px; vertical-align: middle; margin-right: 3px; }
-  .beach-highlight-cards button { display: flex; flex-direction: column-reverse; align-items: stretch; gap: 2px; min-height: 36px; padding: 2px 0; }
+  .beach-highlight-cards button { flex-direction: column-reverse; align-items: stretch; gap: 0; min-height: 44px; padding: 4px 0; }
   .beach-highlight-cards button:nth-of-type(n+2) { display: none; }
   .beach-highlight-cards button span { flex: 0; }
   .beach-highlight-cards small { display: none; }
-  .beach-highlight-cards b { font-size: 17px; letter-spacing: -.5px; }
+  .beach-highlight-cards b { display: flex; align-items: center; gap: 4px; font-size: 17px; line-height: 1.3; letter-spacing: -.5px; }
+  .highlight-value-icon { display: inline; flex-shrink: 0; }
   .beach-highlight-cards strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 400; color: var(--cp-text-muted); }
-  .beach-discovery-tools { display: flex; align-items: center; gap: 8px; }
-  .beach-map-metric { flex: 1; min-width: 0; gap: 6px; }
-  .beach-map-metric > span { font-size: 11px; color: var(--cp-text-muted); }
-  .beach-map-metric .seg-control button { min-height: 30px; padding: 0 6px; font-size: 12px; }
   .beach-map-canvas { flex: 1 1 auto; min-height: 120px; }
   .beach-title h2 { font-size: 20px; }
   .beach-details { gap: 12px; }
-  .beach-detail-history .history-chart, .beach-history-loading { height: 196px; }
-  .beach-app .attribution-bar { min-height: 30px; padding: 6px 10px; gap: 6px; font-size: .6rem; flex-wrap: wrap; }
-  .beach-app .attribution-source { gap: 4px; flex-wrap: wrap; }
-  .beach-app .attribution-credit { font-size: .6rem; }
-  .beach-app .attribution-credit > span { display: none; }
+  .beach-detail-panel .beach-kpi { gap: 1px; padding: 6px 8px; }
+  .beach-detail-panel .beach-kpi > strong { margin-block: 1px; }
+  .beach-detail-history .history-chart, .beach-history-loading { height: clamp(140px, 25dvh, 196px); }
+  .beach-app .water-temperature-legend { padding: 3px 6px; gap: 5px; }
+  .beach-app .attribution-bar { min-height: 28px; padding: 4px 8px; gap: 6px; font-size: 10.5px; }
+  .beach-app .attribution-source { gap: 4px; }
+  .beach-app .attribution-credit { font-size: inherit; }
+  .attribution-copyright, .attribution-freshness { display: none; }
 }
 @media (max-width: 360px) {
   .beach-app .site-header { gap: 4px; padding-inline: 8px; }
@@ -298,14 +296,19 @@
 @media (max-width: 760px) and (max-height: 550px) and (min-width: 560px) {
   .beach-app .beach-map-layout { display: grid; grid-template-columns: minmax(260px, 40%) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
   .beach-discovery { position: relative; min-height: 0; border-right: 1px solid var(--cp-border); border-bottom: 0; }
+  .beach-detail-panel { position: static; height: auto; max-height: none; border: 0; border-radius: 0; box-shadow: none; }
+  .beach-panel-header { padding: 12px; cursor: auto; touch-action: auto; user-select: auto; }
+  .beach-sheet-handle, .beach-sheet-grip { display: none; }
+  .beach-map-layout:has(.beach-detail-panel) .svg-map-controls { top: auto; bottom: 12px; }
+  .beach-map-layout:has(.beach-detail-panel) .water-temperature-legend { bottom: 8px; }
   .beach-discovery .beach-sidebar-body,
   .beach-discovery.has-selection .beach-sidebar-body { position: relative; inset: auto; flex: 1; max-height: none; min-height: 0; overflow-y: auto; padding: 12px; border: 0; border-radius: 0; box-shadow: none; }
   .beach-highlight-cards { grid-template-columns: minmax(0, 1fr); }
   .beach-highlight-group h3 { display: flex; min-height: 0; font-size: 11px; }
+  .beach-highlight-cards .highlight-value-icon { display: none; }
   .beach-highlight-cards button { flex-direction: row; align-items: center; min-height: 40px; }
   .beach-highlight-cards button span { flex: 1; }
   .beach-highlight-cards strong { font-size: 12px; }
-  .beach-forecast-toolbar .date-switch button { padding-inline: 6px; font-size: 10px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .beach-app *, .beach-app *::before, .beach-app *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }

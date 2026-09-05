@@ -201,7 +201,7 @@ export default function App() {
               language={language} windUnit={windUnit} metric={mapMetric}
               onMetricChange={(metric) => setSettings((current) => ({ ...current, mapMetric: metric }))}
               onSelect={selectBeach} onClearSelection={closeBeachDetails}
-              controls={<div className="beach-forecast-toolbar">
+              controls={<>
                 <TerritorySelect value={territory} language={language} onChange={updateTerritory} />
                 <div className="date-switch" role="group" aria-label={copy.forecastDays}>
                   {visibleDates.map((date) => {
@@ -212,7 +212,7 @@ export default function App() {
                     </button>
                   })}
                 </div>
-              </div>}>
+              </>}>
               {selectedBeach && <BeachDetails key={selectedBeach.id} beach={selectedBeach} date={activeDate}
                 dates={visibleDates} language={language} windUnit={windUnit} metric={mapMetric}
                 nearbyBeaches={nearbyBeaches} onSelectNearby={(beach) => selectBeach(beach, nearbyIds)}
@@ -269,12 +269,14 @@ export default function App() {
 
       <footer className="attribution-bar">
         <a className="attribution-source" href="https://www.ipma.pt/" target="_blank" rel="noreferrer noopener">
-          {copy.attribution} IPMA.pt<span>· {copy.freshness} <time dateTime={updatedAt}>{formatFreshnessTimestamp(updatedAt, language)}</time></span>
+          {copy.attribution} IPMA.pt<span>· <span className="attribution-freshness">{copy.freshness} </span><time dateTime={updatedAt} title={copy.freshness}>{formatFreshnessTimestamp(updatedAt, language)}</time></span>
         </a>
         <span className="attribution-credit">
           <a href="https://github.com/f-caetano/aguadapraia" target="_blank" rel="noreferrer noopener"
-            className="attribution-github" aria-label={`GitHub (${copy.opensNewWindow})`}><GithubMark /></a>
-          <span>Filipe Caetano © 2026</span>
+            className="attribution-github" aria-label={`Filipe Caetano · GitHub (${copy.opensNewWindow})`}>
+            <GithubMark /><span>Filipe Caetano</span>
+          </a>
+          <span className="attribution-copyright">© 2026</span>
         </span>
       </footer>
     </div>
