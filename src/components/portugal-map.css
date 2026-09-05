@@ -6,14 +6,48 @@
   pointer-events: none;
 }
 
+/* D3 supplies the animation; CSS must not delay the matching marker counter-scale. */
+.svg-map-shell .map-geometry {
+  transition-property: none;
+}
+
 .svg-map-shell .svg-map-controls button {
   min-width: 44px;
   min-height: 44px;
 }
 
-.svg-map-shell .svg-beach-cluster.selected .cluster-dot,
-.svg-map-shell .svg-beach-cluster:focus-visible .cluster-dot {
+.svg-map-shell .svg-beach-marker.selected .beach-dot,
+.svg-map-shell .svg-beach-cluster.selected .cluster-dot {
   stroke-width: 3.5;
+}
+
+.svg-map-shell .cluster-dot {
+  stroke-width: 2;
+}
+
+.svg-map-shell .beach-dot {
+  transition: opacity 160ms ease;
+}
+
+.svg-map-shell .svg-beach-cluster:focus-visible:not(.selected) .cluster-dot {
+  stroke-width: 3;
+}
+
+.svg-map-shell .beach-temperature,
+.svg-map-shell .cluster-temperature,
+.svg-map-shell .svg-beach-marker.selected .beach-temperature {
+  font-size: 13.5px;
+  transition-property: none;
+}
+
+.svg-map-shell .cluster-count {
+  font-size: 7px;
+}
+
+/* Keep generous touch targets behind every visible marker, not over its neighbours. */
+.svg-map-shell .beach-hit,
+.svg-map-shell .cluster-hit {
+  cursor: pointer;
 }
 
 .svg-map-shell .map-cluster-picker {
@@ -21,7 +55,7 @@
   z-index: 6;
   top: 12px;
   left: 12px;
-  width: min(320px, calc(100% - 24px));
+  width: min(320px, calc(100% - 80px));
   max-height: calc(100% - 72px);
   display: flex;
   flex-direction: column;
@@ -97,4 +131,11 @@
 
 .svg-map-shell .map-cluster-picker small {
   color: var(--cp-text-muted);
+}
+
+.svg-map-shell .map-cluster-hint {
+  margin: 0;
+  padding: 0 12px 10px;
+  color: var(--cp-text-muted);
+  font-size: 0.75rem;
 }

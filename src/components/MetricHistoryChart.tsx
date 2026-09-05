@@ -91,8 +91,8 @@ export default function MetricHistoryChart({
   const hidden = !enabledStatistics.length || (!visibility.forecast && !rawData.some((point) => point.kind === 'history'))
   const labels = { max: copy.maximum, min: copy.minimum, avg: copy.average, value: '' }
   const help = language === 'pt'
-    ? 'Ativa ou oculta séries. A faixa só aparece com Mín. e Máx. ativos. O arquivo guarda previsões, não medições.'
-    : 'Show or hide series. The band requires both Min. and Max. Archives contain forecasts, not measurements.'
+    ? 'Ativa ou oculta séries. A faixa requer Mín. e Máx. O histórico contém previsões guardadas; a linha tracejada mostra as atuais.'
+    : 'Show or hide series. The band requires Min. and Max. History contains saved forecasts; the dashed line shows current forecasts.'
   const dateLabel = (date: string, full = false) => new Intl.DateTimeFormat(locale, {
     day: 'numeric', month: 'short', ...(full ? { year: 'numeric' } : {}),
   }).format(new Date(`${date}T12:00:00Z`))

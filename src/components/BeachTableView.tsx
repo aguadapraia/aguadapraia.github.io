@@ -27,6 +27,7 @@ interface BeachTableViewProps {
   onExploreHistory?: (beach: BeachViewModel) => void
   forecastControl?: ReactNode
   territoryControl?: ReactNode
+  suspendedSize?: { width: number; height: number }
 }
 
 const TABLE_COPY = {
@@ -54,7 +55,6 @@ const TABLE_COPY = {
     expand: 'Ver detalhes de',
     collapse: 'Fechar detalhes de',
     map: 'Ver no mapa',
-    history: 'Ver histórico',
     missing: 'Sem dados para esta data',
     noResults: 'Nenhuma praia corresponde aos filtros',
     noResultsHint: 'Experimenta outro nome ou limpa os filtros.',
@@ -85,7 +85,6 @@ const TABLE_COPY = {
     expand: 'Show details for',
     collapse: 'Hide details for',
     map: 'View on map',
-    history: 'View history',
     missing: 'No data for this date',
     noResults: 'No beaches match your filters',
     noResultsHint: 'Try another name or clear the filters.',
@@ -103,6 +102,7 @@ export default function BeachTableView({
   onExploreHistory,
   forecastControl,
   territoryControl,
+  suspendedSize,
 }: BeachTableViewProps) {
   const uid = useId()
   const [query, setQuery] = useState('')
@@ -183,7 +183,8 @@ export default function BeachTableView({
   }
 
   return (
-    <main className="btv-root beach-table" id="app-content" tabIndex={-1} aria-label={copy.beachList}>
+    <main className="btv-root beach-table" id={suspendedSize ? undefined : 'app-content'} data-suspended={Boolean(suspendedSize)}
+      inert={Boolean(suspendedSize)} aria-hidden={Boolean(suspendedSize)} style={suspendedSize} tabIndex={-1} aria-label={copy.beachList}>
       <section className="beach-table-results" aria-label={copy.beachList}>
         <div className="beach-table-toolbar">
           <div className="beach-table-search">
@@ -288,7 +289,7 @@ export default function BeachTableView({
                               <div className="beach-table-detail-head">
                                 <time dateTime={activeDate || undefined}>{formattedDate}</time>
                                 <div className="beach-table-actions">
-                                  {onExploreHistory && <Button variant="outline" onClick={() => onExploreHistory(beach)}><History size={16} aria-hidden="true" />{text.history}</Button>}
+                                  {onExploreHistory && <Button variant="outline" onClick={() => onExploreHistory(beach)}><History size={16} aria-hidden="true" />{copy.viewHistory}</Button>}
                                   <Button variant="outline" onClick={() => onSelect(beach)}><Map size={16} aria-hidden="true" />{text.map}</Button>
                                 </div>
                               </div>

@@ -1,11 +1,11 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { ArrowUpRight, Droplets, ExternalLink, ThermometerSun, Wind } from 'lucide-react'
+import { ArrowUpRight, Droplets, ThermometerSun, Wind } from 'lucide-react'
 import { historyPointFromTimeline, loadEvolutionBeachHistories, loadTimelineIndex } from '../data/api'
 import { getCopy, type Language } from '../i18n'
 import { forecastForDate } from '../lib/beach-discovery'
 import { lisbonDate } from '../lib/date-classification'
 import { availableEvolutionDates, evolutionPeriodBounds } from '../lib/evolution-period'
-import { convertWind, formatDistance, type WindUnit } from '../lib/units'
+import { convertWind, type WindUnit } from '../lib/units'
 import type { BeachViewModel, HistoryPoint, MapMetric } from '../types'
 import BeachDayHours from './BeachDayHours'
 import LoadingIndicator from './LoadingIndicator'
@@ -74,19 +74,25 @@ export default function BeachDetails({
       </label>}
       {!forecast ? <p role="status">{copy.detailUnavailable}</p> : (
         <div className="beach-forecast-cards" role="group" aria-label={copy.mapMetric}>
-          <button className="beach-kpi beach-kpi-water" type="button" aria-pressed={metric === 'water'} onClick={() => onMetricChange('water')}>
+          <button className="beach-kpi beach-kpi-water" type="button" aria-pressed={metric === 'water'}
+            aria-label={`${copy.water}: ${copy.maximum} ${number(forecast.waterMax)} °C, ${copy.minimum} ${number(forecast.waterMin)} °C`}
+            onClick={() => onMetricChange('water')}>
             <span><Droplets size={17} />{copy.water}</span>
             <strong>{number(forecast.waterMax)}<small>°C</small></strong>
             <span>{copy.maximum}</span>
             <small>{pt ? 'mín' : 'min'} {number(forecast.waterMin)}°</small>
           </button>
-          <button className="beach-kpi beach-kpi-air" type="button" aria-pressed={metric === 'air'} onClick={() => onMetricChange('air')}>
+          <button className="beach-kpi beach-kpi-air" type="button" aria-pressed={metric === 'air'}
+            aria-label={`${copy.air}: ${copy.maximum} ${number(forecast.airMax, 0)} °C, ${copy.minimum} ${number(forecast.airMin, 0)} °C`}
+            onClick={() => onMetricChange('air')}>
             <span><ThermometerSun size={17} />{copy.air}</span>
             <strong>{number(forecast.airMax, 0)}<small>°C</small></strong>
             <span>{copy.maximum}</span>
             <small>{pt ? 'mín' : 'min'} {number(forecast.airMin, 0)}°</small>
           </button>
-          <button className="beach-kpi beach-kpi-wind" type="button" aria-pressed={metric === 'wind'} onClick={() => onMetricChange('wind')}>
+          <button className="beach-kpi beach-kpi-wind" type="button" aria-pressed={metric === 'wind'}
+            aria-label={`${copy.wind}: ${copy.average} ${number(convertWind(forecast.windAverageKnots, windUnit))} ${windLabel}, 08–18h`}
+            onClick={() => onMetricChange('wind')}>
             <span><Wind size={17} />{copy.wind}</span>
             <strong>{number(convertWind(forecast.windAverageKnots, windUnit))}<small>{windLabel}</small></strong>
             <span>{copy.average}</span>
@@ -99,7 +105,7 @@ export default function BeachDetails({
           <h3>{pt ? 'Últimos 30 dias' : 'Last 30 days'}</h3>
           <button type="button" onClick={onExploreHistory}
             title={pt ? 'Ver todo o histórico desta praia' : 'View this beach’s full history'}>
-            {pt ? 'Ver tudo' : 'View all'}<ArrowUpRight size={14} />
+            {copy.viewHistory}<ArrowUpRight size={14} />
           </button>
         </div>
         {error ? <div className="beach-inline-error" role="alert">
@@ -118,14 +124,6 @@ export default function BeachDetails({
         )}
       </section>
       <BeachDayHours key={`${beach.id}/${date}`} beachId={beach.id} date={date} language={language} windUnit={windUnit} />
-      <div className="beach-data-note">
-        {forecast && <p>{pt ? 'Ar: previsão de' : 'Air: forecast for'} {forecast.airLocation} · {formatDistance(forecast.airDistanceKm)}</p>}
-        <p>{pt ? 'Previsões, não observações.' : 'Forecasts, not observations.'}</p>
-        <a target="_blank" rel="noreferrer noopener"
-          href={`https://www.ipma.pt/pt/maritima/costeira/index.jsp?selLocal=${encodeURIComponent(beach.id)}&idLocal=${encodeURIComponent(beach.id)}`}>
-          {pt ? 'Dados: IPMA.pt' : 'Data: IPMA.pt'}<ExternalLink size={12} /><span className="sr-only">{copy.opensNewWindow}</span>
-        </a>
-      </div>
     </section>
   )
 }

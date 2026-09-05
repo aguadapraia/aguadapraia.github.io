@@ -16,6 +16,7 @@ import { z } from 'zod'
 import { classifyDate } from '../lib/date-classification'
 import { canonicalBeachName } from '../lib/beach-name'
 import { publicAssetUrl } from '../lib/public-asset'
+import { HIGHLIGHT_SIMILARITY } from '../lib/highlight-policy'
 
 function dataUrl(
   subpath: string,
@@ -113,6 +114,7 @@ interface RawPayload {
 
 interface BeachMetadata {
   id: string
+  name: string
   territory: Territory
   district: string
   municipality: string
@@ -146,8 +148,21 @@ export interface EvolutionSummaryData {
   end: string
   dates: string[]
   aggregates: Array<Omit<TerritoryAggregate, 'kind'>>
+  records?: HistoricalRecords
+  recordCandidates?: HistoricalRecords
   generatedAt: string
 }
+
+export interface HistoricalRecord {
+  beachId: string
+  date: string
+  value: number
+}
+
+export type HistoricalRecords = Record<'water' | 'air' | 'wind', {
+  min: HistoricalRecord[]
+  max: HistoricalRecord[]
+}>
 
 export interface EvolutionDateData {
   schemaVersion: number
@@ -253,6 +268,7 @@ const rawPayloadSchema: z.ZodType<RawPayload> = z.object({
 
 const beachMetadataSchema: z.ZodType<BeachMetadata> = z.object({
   id: z.string().min(1),
+  name: z.string().min(1),
   territory: z.enum(['mainland', 'madeira', 'azores']),
   district: z.string().min(1),
   municipality: z.string().min(1),
@@ -294,12 +310,38 @@ const evolutionAggregateSchema = z.object({
   wind: metricAggregateSchema.nullable(),
 })
 
+const historicalRecordSchema: z.ZodType<HistoricalRecord> = z.object({
+  beachId: z.string().min(1),
+  date: z.string().date(),
+  value: z.number(),
+})
+const historicalMetricRecordsSchema = z.object({
+  min: z.array(historicalRecordSchema).max(2),
+  max: z.array(historicalRecordSchema).max(2),
+})
+const historicalRecordsSchema: z.ZodType<HistoricalRecords> = z.object({
+  water: historicalMetricRecordsSchema,
+  air: historicalMetricRecordsSchema,
+  wind: historicalMetricRecordsSchema,
+})
+const historicalCandidateMetricSchema = z.object({
+  min: z.array(historicalRecordSchema).max(512),
+  max: z.array(historicalRecordSchema).max(512),
+})
+const historicalCandidatesSchema: z.ZodType<HistoricalRecords> = z.object({
+  water: historicalCandidateMetricSchema,
+  air: historicalCandidateMetricSchema,
+  wind: historicalCandidateMetricSchema,
+})
+
 const evolutionSummarySchema: z.ZodType<EvolutionSummaryData> = z.object({
   schemaVersion: z.number().int(),
   start: z.string().date(),
   end: z.string().date(),
   dates: z.array(z.string().date()),
   aggregates: z.array(evolutionAggregateSchema),
+  records: historicalRecordsSchema.optional(),
+  recordCandidates: historicalCandidatesSchema.optional(),
   generatedAt: z.string().datetime({ offset: true }),
 })
 
@@ -513,7 +555,7 @@ function buildBeaches(
 
     return {
       ...beach,
-      name: canonicalBeachName(beach.name, location.municipality),
+      name: canonicalBeachName(location.name, location.municipality),
       sourceLatitude: location.sourceLatitude,
       sourceLongitude: location.sourceLongitude,
       latitude: location.displayLatitude,
@@ -569,8 +611,13 @@ export async function loadEvolutionSummary(
   end: string,
   territory: TerritoryFilter,
   signal?: AbortSignal,
+  includeCandidates = false,
 ): Promise<EvolutionSummaryData> {
-  const query = new URLSearchParams({ start, end, territory })
+  const query = new URLSearchParams({
+    start, end, territory, records: includeCandidates ? '2' : '1',
+    temperatureTolerance: String(HIGHLIGHT_SIMILARITY.temperatureCelsius),
+    windToleranceKnots: String(HIGHLIGHT_SIMILARITY.windKnots),
+  })
   const response = await fetch(
     dataUrl(`evolution/summary.json?${query.toString()}`),
     { cache: 'default', signal },
@@ -660,7 +707,7 @@ export async function loadBeachDayDetail(
 export async function loadBeachDataset(): Promise<BeachDataset> {
   const [latestResponse, metadataResponse] = await Promise.all([
     fetch(dataUrl('latest.json'), { cache: 'default' }),
-    fetch(publicAssetUrl('data/beach-metadata.json'), { cache: 'force-cache' }),
+    fetch(publicAssetUrl('data/beach-metadata.json'), { cache: 'no-cache' }),
   ])
   if (!latestResponse.ok || !metadataResponse.ok) {
     throw new Error('Published beach data is unavailable')

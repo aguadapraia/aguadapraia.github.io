@@ -547,16 +547,16 @@
   },
   {
     "id": "126",
-    "name": "Coxos, Torres Vedras",
+    "name": "Coxos",
     "territory": "mainland",
     "district": "Lisboa",
-    "municipality": "Torres Vedras",
+    "municipality": "Mafra",
     "sourceLatitude": 39.0033,
     "sourceLongitude": -9.425,
-    "displayLatitude": 39.068299,
-    "displayLongitude": -9.408531,
-    "displayAdjustmentKm": 7.4,
-    "displayCoordinateSource": "municipality-coast-snap"
+    "displayLatitude": 39.005363,
+    "displayLongitude": -9.425175,
+    "displayAdjustmentKm": 0.2,
+    "displayCoordinateSource": "reviewed"
   },
   {
     "id": "201",

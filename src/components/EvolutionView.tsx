@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Area, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { ArrowUp, CalendarDays, ChevronDown, Droplets, Search, ThermometerSun, X, Wind } from 'lucide-react'
+import { ArrowLeft, ArrowUp, CalendarDays, ChevronDown, Droplets, Search, ThermometerSun, X, Wind } from 'lucide-react'
 import {
   historyPointFromTimeline,
   loadBeachDayDetail,
@@ -8,19 +8,21 @@ import {
   loadEvolutionDate,
   loadEvolutionSummary,
   loadTimelineIndex,
+  type HistoricalRecords,
   type TimelinePoint,
 } from '../data/api'
 import { getCopy, type Language } from '../i18n'
 import { beachColor } from '../lib/beach-palette'
 import { uniqueShortBeachName } from '../lib/beach-name'
 import { normalizeBeachSearch } from '../lib/beach-search'
-import { classifyDate, lisbonDate, preferredForecastDate } from '../lib/date-classification'
+import { HIGHLIGHT_SIMILARITY } from '../lib/highlight-policy'
+import { lisbonDate } from '../lib/date-classification'
 import { daytimeReadings, hasHourlyAir } from '../lib/daytime-hours'
 import {
   chartLineReadings, chartLineStatistics, chartReadingRange, DEFAULT_CHART_VISIBILITY,
   summarizeChartStatistic, visibleChartReadings, visibleChartStatistics, type ChartReadings, type ChartStatistic,
 } from '../lib/chart-visibility'
-import { loadBoundedEvolution } from '../lib/evolution-history'
+import { loadBoundedEvolution, mergeHistoricalRecords, recordsFromHistories } from '../lib/evolution-history'
 import {
   availableEvolutionDates,
   calendarDayCount,
@@ -28,7 +30,6 @@ import {
   resolveEvolutionPeriod,
   type EvolutionPeriod,
 } from '../lib/evolution-period'
-import { computeTerritoryAggregate } from '../lib/territory-aggregate'
 import { convertWind, type WindUnit } from '../lib/units'
 import { windDirectionDegrees } from '../lib/wind-direction'
 import type { BeachDataset, BeachDayDetail, BeachViewModel, HistoryPoint, MapMetric, SettingsMapMetric, TerritoryAggregate, TerritoryFilter, Theme } from '../types'
@@ -48,8 +49,8 @@ const text = {
     from: 'De', to: 'Até', apply: 'Ver período', chooseBeach: 'Procurar praias para comparar',
     addBeach: 'Adicionar praia', noMatches: 'Nenhuma praia encontrada.',
     maxBeaches: 'Quatro praias selecionadas. Remove uma para adicionar outra.',
-    archive: 'Arquivo', forecasts: 'Previsões', currentForecast: 'Previsão atual', mixed: 'Arquivo + previsão',
-    archiveNote: 'O arquivo guarda previsões publicadas, não observações medidas.',
+    archive: 'Histórico', forecasts: 'Previsões guardadas',
+    archiveNote: 'Previsões guardadas de dias anteriores, não medições.',
     noArchive: 'Ainda não há dias de arquivo disponíveis.',
     indexError: 'Não foi possível confirmar a disponibilidade do arquivo.',
     periodError: 'Escolhe datas válidas, com o início anterior ou igual ao fim.',
@@ -69,18 +70,20 @@ const text = {
     noData: 'Sem dados para estas séries.', hiddenSeries: 'Ativa uma série na legenda.',
     map: 'Mapa', mapHint: 'Gráfico: escolhe o dia. Mapa: compara praias.',
     mapDate: 'Dia no mapa', viewDay: 'Detalhe do dia', mapEmpty: 'Sem valores para este dia e indicador.',
+    recordDay: 'Ver este dia no mapa',
+    recordBeach: 'Ver praia e dia no mapa', recordLocations: 'Extremos por praia',
+    highest: 'Máximos', lowest: 'Mínimos', recordsUnavailable: 'Extremos por praia indisponíveis.',
     hourly: 'Valores por hora', time: 'Hora', water: 'Água', air: 'Ar', wind: 'Vento',
     windDirection: 'Direção do vento', loading: 'A carregar o período…', retry: 'Tentar novamente',
     windDirectionNote: 'A direção indica de onde vem o vento; as setas mostram para onde sopra.',
     loadError: 'Não foi possível carregar estes dados. Tenta novamente.',
     partialError: 'Não foi possível carregar todas as praias. Os valores em falta não são estimados.',
-    remove: 'Remover', chart: 'Evolução no período selecionado',
-    forecastDay: 'Ver previsão de hoje', latestForecast: 'Ver previsão disponível',
-    dayKindArchive: 'Previsão arquivada', dayKindForecast: 'Previsão publicada',
+    remove: 'Remover', chart: 'Histórico das previsões no período selecionado',
+    dayKindArchive: 'Previsão guardada',
     territoryAverage: 'Média da região', compareHint: 'Até 4 praias · sem seleção, média da região',
     pickDate: 'Escolher dia / intervalo', close: 'Fechar calendário',
     rangeHint: 'Tudo inclui o arquivo completo. Semana e mês são períodos de calendário.',
-    fullArchive: 'Arquivo completo', forecastSection: 'Previsão atual / futura',
+    fullArchive: 'Histórico completo',
     legendHelp: 'As opções aplicam-se a todas as praias. A faixa só aparece com Mín. e Máx. ativos. As falhas ficam em branco, sem interpolação.',
   },
   en: {
@@ -90,8 +93,8 @@ const text = {
     from: 'From', to: 'To', apply: 'View period', chooseBeach: 'Find beaches to compare',
     addBeach: 'Add a beach', noMatches: 'No beaches found.',
     maxBeaches: 'Four beaches selected. Remove one to add another.',
-    archive: 'Archive', forecasts: 'Forecasts', currentForecast: 'Current forecast', mixed: 'Archive + forecast',
-    archiveNote: 'The archive stores published forecasts, not measured observations.',
+    archive: 'History', forecasts: 'Saved forecasts',
+    archiveNote: 'Saved forecasts for past dates, not measurements.',
     noArchive: 'No archive days are available yet.',
     indexError: 'Archive availability could not be confirmed.',
     periodError: 'Choose valid dates, with the start on or before the end.',
@@ -111,18 +114,20 @@ const text = {
     noData: 'No data for these series.', hiddenSeries: 'Enable a series in the legend.',
     map: 'Map', mapHint: 'Chart: choose a day. Map: compare beaches.',
     mapDate: 'Map day', viewDay: 'Day detail', mapEmpty: 'No values for this day and metric.',
+    recordDay: 'Show this day on the map',
+    recordBeach: 'Show beach and date on the map', recordLocations: 'Beach extremes',
+    highest: 'Highest', lowest: 'Lowest', recordsUnavailable: 'Beach extremes are unavailable.',
     hourly: 'Hourly values', time: 'Time', water: 'Water', air: 'Air', wind: 'Wind',
     windDirection: 'Wind direction', loading: 'Loading this period…', retry: 'Try again',
     windDirectionNote: 'Direction indicates where the wind comes from; arrows show where it blows.',
     loadError: 'These data could not be loaded. Please try again.',
     partialError: 'Some beaches could not be loaded. Missing values are not estimated.',
-    remove: 'Remove', chart: 'Evolution during the selected period',
-    forecastDay: 'See today’s forecast', latestForecast: 'See available forecast',
-    dayKindArchive: 'Archived forecast', dayKindForecast: 'Published forecast',
+    remove: 'Remove', chart: 'Forecast history during the selected period',
+    dayKindArchive: 'Saved forecast',
     territoryAverage: 'Region average', compareHint: 'Up to 4 beaches · none selected shows the region average',
     pickDate: 'Choose day / range', close: 'Close calendar',
     rangeHint: 'All includes the full archive. Week and month are calendar periods.',
-    fullArchive: 'Full archive', forecastSection: 'Current / future forecast',
+    fullArchive: 'Full history',
     legendHelp: 'Options apply to all beaches. The band requires both Min. and Max. Missing values stay blank, without interpolation.',
   },
 } as const
@@ -132,14 +137,15 @@ interface EvolutionViewProps {
   language: Language
   windUnit: WindUnit
   theme: Theme
-  territory: TerritoryFilter
-  onTerritoryChange: (territory: TerritoryFilter) => void
+  initialTerritory: TerritoryFilter
   initialMapMetric: SettingsMapMetric
-  onMapMetricChange: (metric: SettingsMapMetric) => void
   initialBeachId?: string
+  onReturn: () => void
+  returnLabel: string
 }
 
 type Aggregate = Omit<TerritoryAggregate, 'kind'>
+interface ArchiveSummary { values: Aggregate[]; records?: HistoricalRecords; recordCandidates?: HistoricalRecords }
 type ChartPoint = { date: string; [key: string]: string | number | number[] | undefined }
 type ViewPeriodPreset = 'all' | 'month' | 'week' | 'day' | 'custom'
 interface Series { key: string; name: string; color: string }
@@ -180,13 +186,14 @@ function retainCache<T>(cache: Map<string, T>, key: string, value: T) {
 }
 
 export default function EvolutionView({
-  dataset, language, windUnit, theme, territory, onTerritoryChange,
-  initialMapMetric, onMapMetricChange, initialBeachId,
+  dataset, language, windUnit, theme, initialTerritory,
+  initialMapMetric, initialBeachId, onReturn, returnLabel,
 }: EvolutionViewProps) {
   const copy = getCopy(language)
   const t = text[language]
   const today = lisbonDate()
   const [metric, setMetric] = useState<MapMetric>(initialMapMetric)
+  const [territory, onTerritoryChange] = useState(initialTerritory)
   const [visibility, setVisibility] = useState(DEFAULT_CHART_VISIBILITY)
   const [selectedIds, setSelectedIds] = useState<string[]>(() =>
     initialBeachId && dataset.beaches.some((beach) => beach.id === initialBeachId) ? [initialBeachId] : [],
@@ -207,17 +214,18 @@ export default function EvolutionView({
   const [periodError, setPeriodError] = useState<'invalid' | 'empty' | null>(null)
   const [mapIndex, setMapIndex] = useState(-1)
   const [isMobile, setIsMobile] = useState(false)
-  const [summaryResult, setSummaryResult] = useState<{ key: string; values: Aggregate[] } | null>(null)
+  const [summaryResult, setSummaryResult] = useState<ArchiveSummary & { key: string } | null>(null)
   const [historyResult, setHistoryResult] = useState<{ key: string; values: Map<string, HistoryPoint[]> } | null>(null)
   const [detailsResult, setDetailsResult] = useState<{ key: string; values: Map<string, BeachDayDetail>; failed: boolean } | null>(null)
   const [loadState, setLoadState] = useState<{ key: string; status: 'loading' | 'error' | 'ready' }>({ key: '', status: 'ready' })
   const [mapResult, setMapResult] = useState<{ key: string; points: TimelinePoint[] } | null>(null)
   const [mapState, setMapState] = useState<{ key: string; status: 'loading' | 'error' | 'ready' }>({ key: '', status: 'ready' })
-  const summaryCache = useRef(new Map<string, Aggregate[]>())
+  const summaryCache = useRef(new Map<string, ArchiveSummary>())
   const historyCache = useRef(new Map<string, Map<string, HistoryPoint[]>>())
   const mapCache = useRef(new Map<string, TimelinePoint[]>())
   const dateControl = useRef<HTMLDetailsElement>(null)
   const appliedSeed = useRef<string | undefined>(undefined)
+  const [recordFocus, setRecordFocus] = useState<{ key: string; metric: MapMetric; beachId: string } | null>(null)
 
   useEffect(() => { setMetric(initialMapMetric) }, [initialMapMetric])
 
@@ -253,11 +261,8 @@ export default function EvolutionView({
   }, [dataset.generatedAt, indexRetry])
 
   const archiveDates = useMemo(() => indexDates.filter((date) => date < today), [indexDates, today])
-  const forecastDates = useMemo(() => availableEvolutionDates(dataset.forecastDates.filter((date) => date >= today)), [dataset.forecastDates, today])
-  const availableDates = useMemo(() => availableEvolutionDates([...archiveDates, ...forecastDates]), [archiveDates, forecastDates])
   const firstArchive = archiveDates[0] ?? ''
   const lastArchive = archiveDates[archiveDates.length - 1] ?? ''
-  const forecastDate = preferredForecastDate(forecastDates)
 
   useEffect(() => {
     if (indexLoading || indexError || preset !== 'all') return
@@ -304,6 +309,10 @@ export default function EvolutionView({
   const loading = indexLoading || (hasDates && (loadState.key !== dataKey || loadState.status === 'loading'))
   const loadError = loadState.key === dataKey && loadState.status === 'error'
   const partialError = detailsResult?.key === dataKey && detailsResult.failed
+  const rankedRecords = useMemo(() => !period || singleDay ? undefined : scope === 'territory'
+    ? summaryResult?.key === dataKey ? summaryResult.records : undefined
+    : historyResult?.key === dataKey ? recordsFromHistories(historyResult.values, period.start, period.end, dataset.beaches) : undefined,
+  [period, singleDay, scope, summaryResult, historyResult, dataKey, dataset.beaches])
 
   useEffect(() => {
     if (!period || !hasDates) return
@@ -313,25 +322,25 @@ export default function EvolutionView({
     const complete = () => { if (active) setLoadState({ key: dataKey, status: 'ready' }) }
     const fail = () => { if (active) setLoadState({ key: dataKey, status: 'error' }) }
     const archiveEnd = period.end < lastArchive ? period.end : lastArchive
+    const includeCandidates = calendarDayCount(period.start, archiveEnd) > 366
     if (scope === 'territory') {
-      if (!period.dates.some((date) => date < today)) {
-        setSummaryResult({ key: dataKey, values: [] })
+      loadBoundedEvolution({
+        start: period.start, end: archiveEnd, signal: controller.signal,
+        cache: summaryCache.current, cacheKey: `${dataset.generatedAt}|${territory}|${includeCandidates ? 'candidates' : 'records'}`,
+        load: async (start, end, signal) => {
+          const result = await loadEvolutionSummary(start, end, territory, signal, includeCandidates)
+          return {
+            values: result.aggregates.filter((value) => value.date >= start && value.date <= end),
+            records: result.records, recordCandidates: result.recordCandidates,
+          }
+        },
+      }).then((chunks) => {
+        if (!active) return
+        const values = [...new Map(chunks.flatMap((chunk) => chunk.values).map((value) => [value.date, value])).values()]
+        const records = mergeHistoricalRecords(chunks.map((chunk) => includeCandidates ? chunk.recordCandidates : chunk.records), dataset.beaches)
+        setSummaryResult({ key: dataKey, values, records })
         complete()
-      } else {
-        loadBoundedEvolution({
-          start: period.start, end: archiveEnd, signal: controller.signal,
-          cache: summaryCache.current, cacheKey: `${dataset.generatedAt}|${territory}`,
-          load: async (start, end, signal) => {
-            const result = await loadEvolutionSummary(start, end, territory, signal)
-            return result.aggregates.filter((value) => value.date >= start && value.date <= end)
-          },
-        }).then((chunks) => {
-          if (!active) return
-          const values = [...new Map(chunks.flat().map((value) => [value.date, value])).values()]
-          setSummaryResult({ key: dataKey, values })
-          complete()
-        }).catch(fail)
-      }
+      }).catch(fail)
     } else if (singleDay) {
       Promise.allSettled(idsKey.split(',').map((id) => loadBeachDayDetail(id, period.start))).then((results) => {
         if (!active) return
@@ -347,38 +356,34 @@ export default function EvolutionView({
         else complete()
       })
     } else {
-      if (!period.dates.some((date) => date < today)) {
-        setHistoryResult({ key: dataKey, values: new Map() })
-        complete()
-      } else {
-        loadBoundedEvolution({
-          start: period.start, end: archiveEnd, signal: controller.signal,
-          cache: historyCache.current, cacheKey: `${dataset.generatedAt}|${idsKey}`,
-          load: async (start, end, signal) => {
-            const result = await loadEvolutionBeachHistories(idsKey.split(','), start, end, signal)
-            return new Map(result.histories.map((history) => [
-              history.beachId,
-              history.points.filter((point) => point.date >= start && point.date <= end && point.beachId === history.beachId)
-                .map((point) => historyPointFromTimeline(point, dataset.forecastDates)),
-            ]))
-          },
-        }).then((chunks) => {
-          if (!active) return
-          const values = new Map(idsKey.split(',').map((id) => [
-            id,
-            [...new Map(chunks.flatMap((chunk) => chunk.get(id) ?? []).map((point) => [point.date, point])).values()],
+      loadBoundedEvolution({
+        start: period.start, end: archiveEnd, signal: controller.signal,
+        cache: historyCache.current, cacheKey: `${dataset.generatedAt}|${idsKey}`,
+        load: async (start, end, signal) => {
+          const result = await loadEvolutionBeachHistories(idsKey.split(','), start, end, signal)
+          return new Map(result.histories.map((history) => [
+            history.beachId,
+            history.points.filter((point) => point.date >= start && point.date <= end && point.beachId === history.beachId)
+              .map((point) => historyPointFromTimeline(point, [])),
           ]))
-          setHistoryResult({ key: dataKey, values })
-          complete()
-        }).catch(fail)
-      }
+        },
+      }).then((chunks) => {
+        if (!active) return
+        const values = new Map(idsKey.split(',').map((id) => [
+          id,
+          [...new Map(chunks.flatMap((chunk) => chunk.get(id) ?? []).map((point) => [point.date, point])).values()],
+        ]))
+        setHistoryResult({ key: dataKey, values })
+        complete()
+      }).catch(fail)
     }
     return () => { active = false; controller.abort() }
-  }, [dataKey, dataset.forecastDates, dataset.generatedAt, hasDates, idsKey, lastArchive, period, retry, scope, singleDay, territory, today])
+  }, [dataKey, dataset.beaches, dataset.generatedAt, hasDates, idsKey, lastArchive, period, retry, scope, singleDay, territory])
 
   const mapDates = period?.calendarDates ?? []
   const activeMapIndex = mapIndex >= 0 && mapIndex < mapDates.length ? mapIndex : Math.max(0, mapDates.length - 1)
   const mapDate = mapDates[activeMapIndex] ?? ''
+  const recordBeachId = recordFocus?.key === dataKey && recordFocus.metric === metric ? recordFocus.beachId : ''
   const mapPublished = Boolean(period?.dates.includes(mapDate))
   const mapKey = `${dataset.generatedAt}|${territory}|${mapDate}`
   const mapLoading = mapPublished && mapDate < today && (mapState.key !== mapKey || mapState.status === 'loading')
@@ -413,9 +418,6 @@ export default function EvolutionView({
 
   const mapBeaches = useMemo(() => {
     if (!mapPublished) return []
-    if (mapDate >= today) return territoryBeaches.filter((beach) =>
-      metricValue(beach.history.find((point) => point.date === mapDate), metric) !== undefined,
-    )
     if (mapResult?.key !== mapKey) return []
     const points = new Map(mapResult.points.map((point) => [point.beachId, point]))
     return territoryBeaches.flatMap((beach) => {
@@ -423,7 +425,7 @@ export default function EvolutionView({
       if (!point || metricValue({ ...point, label: '', kind: 'history' }, metric) === undefined) return []
       return [mapBeach(beach, point)]
     })
-  }, [mapDate, mapKey, mapPublished, mapResult, metric, territoryBeaches, today])
+  }, [mapKey, mapPublished, mapResult, metric, territoryBeaches])
 
   const searchMatches = useMemo(() => {
     const normalized = normalizeBeachSearch(query)
@@ -435,8 +437,7 @@ export default function EvolutionView({
   function applyPeriod(start: string, end: string, nextPreset: ViewPeriodPreset = preset) {
     const size = calendarDayCount(start, end)
     if (!size) { setPeriodError('invalid'); return }
-    const historicalPreset = nextPreset === 'all' || nextPreset === 'week' || nextPreset === 'month'
-    const next = resolveEvolutionPeriod(start, end, historicalPreset ? archiveDates : availableDates)
+    const next = resolveEvolutionPeriod(start, end, archiveDates)
     setPendingStart(start)
     setPendingEnd(end)
     setPreset(nextPreset)
@@ -445,7 +446,7 @@ export default function EvolutionView({
     if (dateControl.current) dateControl.current.open = false
   }
 
-  function choosePreset(nextPreset: Exclude<ViewPeriodPreset, 'custom'>, anchor = lastArchive || forecastDate) {
+  function choosePreset(nextPreset: Exclude<ViewPeriodPreset, 'custom'>, anchor = lastArchive) {
     setPeriodError(null)
     if (nextPreset === 'all') {
       applyPeriod(firstArchive, lastArchive, 'all')
@@ -467,6 +468,7 @@ export default function EvolutionView({
   }
 
   function selectMapBeach(id: string) {
+    setRecordFocus(null)
     if (selectedIds.includes(id)) {
       setSelectedIds((ids) => ids.filter((value) => value !== id))
     }
@@ -494,45 +496,37 @@ export default function EvolutionView({
   const enabledStatistics = visibleChartStatistics(visibility, statistics)
   const lineStatistics = chartLineStatistics(visibility, statistics)
   const statisticLabels = { max: t.maximum, min: t.minimum, avg: t.average, value: t.hourly }
-  const kinds = (['history', 'forecast'] as const).filter((kind) => kind === 'history' || visibility.forecast)
   const aggregateLookup = new Map(summaryValues.map((value) => [value.date, value]))
   const publishedSet = new Set(period?.dates)
-  const histories = activeBeaches.map((beach) => {
-    const points = new Map((historyValues.get(beach.id) ?? []).map((point) => [point.date, point]))
-    for (const point of beach.history) {
-      if (point.date >= today && forecastDates.includes(point.date)) points.set(point.date, point)
-    }
-    return points
-  })
+  const histories = activeBeaches.map((beach) =>
+    new Map((historyValues.get(beach.id) ?? []).map((point) => [point.date, point])))
   const summaries: Summary[] = scope === 'territory'
     ? [{ id: 'territory', name: territoryName, color: metricColor, values: [] }]
     : activeBeaches.map((beach, index) => ({ id: beach.id, name: series[index].name, color: series[index].color, values: [] }))
 
-  function writeReadings(row: ChartPoint, key: string, readings: ChartReadings, kind: 'history' | 'forecast') {
-    const shown = visibleChartReadings(readings, visibility, statistics, kind)
+  function writeReadings(row: ChartPoint, key: string, readings: ChartReadings) {
+    const shown = visibleChartReadings(readings, visibility, statistics, 'history')
     for (const statistic of enabledStatistics) {
       const value = shown[statistic]
-      if (value !== undefined) row[`${kind}_${key}_${statistic}`] = displayValue(value)
+      if (value !== undefined) row[`${key}_${statistic}`] = displayValue(value)
     }
     const range = chartReadingRange(shown)
-    if (range) row[`${kind}_${key}_range`] = range.map(displayValue)
+    if (range) row[`${key}_range`] = range.map(displayValue)
     return shown
   }
 
   function prepareLines(data: ChartPoint[]) {
     data.forEach((row, index) => {
       for (const item of series) {
-        for (const kind of kinds) {
-          const key = `${kind}_${item.key}`
-          const readings: ChartReadings = {}
-          for (const statistic of enabledStatistics) {
-            const value = row[`${key}_${statistic}`]
-            if (typeof value === 'number') readings[statistic] = value
-          }
-          const adjacentRange = Array.isArray(data[index - 1]?.[`${key}_range`]) || Array.isArray(data[index + 1]?.[`${key}_range`])
-          const lines = chartLineReadings(readings, lineStatistics, adjacentRange)
-          for (const statistic of enabledStatistics) row[`${key}_${statistic}_line`] = lines[statistic]
+        const key = item.key
+        const readings: ChartReadings = {}
+        for (const statistic of enabledStatistics) {
+          const value = row[`${key}_${statistic}`]
+          if (typeof value === 'number') readings[statistic] = value
         }
+        const adjacentRange = Array.isArray(data[index - 1]?.[`${key}_range`]) || Array.isArray(data[index + 1]?.[`${key}_range`])
+        const lines = chartLineReadings(readings, lineStatistics, adjacentRange)
+        for (const statistic of enabledStatistics) row[`${key}_${statistic}_line`] = lines[statistic]
       }
     })
   }
@@ -540,12 +534,11 @@ export default function EvolutionView({
   const chartData: ChartPoint[] = (period?.calendarDates ?? []).map((date) => {
     const row: ChartPoint = { date }
     if (!publishedSet.has(date)) return row
-    const kind = date < today ? 'history' : 'forecast'
     if (scope === 'territory') {
-      const aggregate = date < today ? aggregateLookup.get(date) : computeTerritoryAggregate(territoryBeaches, date, classifyDate(date, dataset.forecastDates))
+      const aggregate = aggregateLookup.get(date)
       const value = aggregate?.[metric]
       if (value) {
-        const shown = writeReadings(row, 'territory', value, kind)
+        const shown = writeReadings(row, 'territory', value)
         if (Object.keys(shown).length) summaries[0].values.push({ date, ...shown })
       }
     } else {
@@ -559,7 +552,7 @@ export default function EvolutionView({
             max: finite(metric === 'water' ? point?.waterMax : metric === 'air' ? point?.airMax : point?.windMaxKnots),
             avg: metric === 'wind' ? finite(point?.windAverageKnots) : undefined,
           }
-        const shown = writeReadings(row, `beach${index}`, values, kind)
+        const shown = writeReadings(row, `beach${index}`, values)
         if (Object.keys(shown).length) summaries[index].values.push({ date, ...shown })
       })
     }
@@ -567,28 +560,13 @@ export default function EvolutionView({
   })
   prepareLines(chartData)
 
-  // Only bridge adjacent published days; never draw a line across a missing day.
-  chartData.forEach((row, index) => {
-    if (index === 0 || row.date < today) return
-    const previous = chartData[index - 1]
-    if (previous.date >= today) return
-    for (const item of series) {
-      for (const statistic of enabledStatistics) {
-        const key = `${item.key}_${statistic}_line`
-        if (typeof row[`forecast_${key}`] === 'number' && typeof previous[`history_${key}`] === 'number') {
-          previous[`forecast_${key}`] = previous[`history_${key}`]
-        }
-      }
-    }
-  })
-
   const hourlyData: ChartPoint[] = Array.from({ length: 11 }, (_, index) => {
     const hour = index + 8
     const row: ChartPoint = { date: `${hour.toString().padStart(2, '0')}:00` }
     activeBeaches.forEach((beach, beachIndex) => {
       const reading = daytimeReadings(dayDetails.get(beach.id)?.hourly ?? []).find((item) => item.hour === hour)
       const value = finite(metric === 'water' ? reading?.waterTemperatureCelsius : metric === 'wind' ? reading?.windKnots : reading?.airTemperatureCelsius)
-      writeReadings(row, `beach${beachIndex}`, { value }, period && period.start < today ? 'history' : 'forecast')
+      writeReadings(row, `beach${beachIndex}`, { value })
     })
     return row
   })
@@ -600,12 +578,9 @@ export default function EvolutionView({
   const hasChart = chartValues.length > 0 && !dailyAirFallback
   const chartMin = Math.floor(chartValues.reduce((min, value) => Math.min(min, value), Infinity) - 1)
   const chartMax = Math.ceil(chartValues.reduce((max, value) => Math.max(max, value), -Infinity) + 1)
-  const historicalCount = period?.dates.filter((date) => date < today).length ?? 0
-  const forecastCount = period?.dates.filter((date) => date >= today).length ?? 0
-  const hiddenSeries = !enabledStatistics.length || (!historicalCount && !visibility.forecast)
-  const summaryDays = period?.calendarDates.filter((date) => date < today || visibility.forecast).length ?? 0
-  const provenance = historicalCount && forecastCount && visibility.forecast ? t.mixed : historicalCount ? t.archive : t.currentForecast
-  const visibleDays = historicalCount + (visibility.forecast ? forecastCount : 0)
+  const hiddenSeries = !enabledStatistics.length
+  const summaryDays = period?.calendarDates.length ?? 0
+  const visibleDays = period?.dates.length ?? 0
   const readingHelp = hourlyMode ? dailyAirFallback ? t.airDaily : t.hourlyReading
     : scope === 'territory' ? `${t.territoryReading} ${metric !== 'wind' ? t.temperatureReading : ''}` : t.beachReading
   const periodLabel = period ? `${formatDate(period.start, language, true)}${singleDay ? '' : ` – ${formatDate(period.end, language, true)}`}` : ''
@@ -615,11 +590,12 @@ export default function EvolutionView({
     : t.noArchive
 
   return (
-    <main id="app-content" tabIndex={-1} className="evolution-page"
-      style={{ '--evo-metric': metricColor, '--evo-stats-height': `${Math.max(1, activeBeaches.length) * 32}px` } as CSSProperties}>
+    <main id="app-content" tabIndex={-1} className="evolution-page" aria-label={copy.evolutionTitle}
+      style={{ '--evo-metric': metricColor, '--evo-stats-height': `${Math.max(1, activeBeaches.length) * 44}px` } as CSSProperties}>
       <div className="evo-content">
         <section className="evo-controls" aria-label={t.chart}>
           <div className="evo-comparison-row">
+            <button type="button" className="evo-return" onClick={onReturn} aria-label={returnLabel} title={returnLabel}><ArrowLeft size={18} aria-hidden="true" /></button>
             <TerritorySelect value={territory} language={language} onChange={onTerritoryChange} />
             <div className="evo-search" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setSearchOpen(false) }}>
               <Search size={17} aria-hidden="true" />
@@ -667,7 +643,7 @@ export default function EvolutionView({
           <div className="evo-toolbar">
             <div className="evo-segment evo-metric-control" role="group" aria-label={t.metric}>
               {([['water', Droplets], ['air', ThermometerSun], ['wind', Wind]] as const).map(([value, Icon]) => (
-                <button key={value} className={`metric-tab metric-tab--${value}${metric === value ? ' active' : ''}`} type="button" aria-pressed={metric === value} onClick={() => { setMetric(value); onMapMetricChange(value) }}>
+                <button key={value} className={`metric-tab metric-tab--${value}${metric === value ? ' active' : ''}`} type="button" aria-pressed={metric === value} onClick={() => setMetric(value)}>
                   <Icon size={16} aria-hidden="true" />{t[value]}
                 </button>
               ))}
@@ -690,8 +666,8 @@ export default function EvolutionView({
                   onClick={() => {
                     if (dateControl.current?.open) return
                     setDateMode(preset === 'day' || preset === 'week' || preset === 'month' ? preset : 'custom')
-                    setPendingStart(period?.start || lastArchive || forecastDate)
-                    setPendingEnd(period?.end || lastArchive || forecastDate)
+                    setPendingStart(period?.start || lastArchive)
+                    setPendingEnd(period?.end || lastArchive)
                   }}>
                   <CalendarDays size={16} aria-hidden="true" />
                   <span>{t.pickDate}</span>
@@ -707,7 +683,7 @@ export default function EvolutionView({
                       <button type="button" key={value} aria-pressed={dateMode === value}
                         disabled={(value === 'week' || value === 'month') && (!lastArchive || indexError)} onClick={() => {
                         setDateMode(value)
-                        if (dateMode === 'custom' && value !== 'custom') setPendingStart(period?.end || lastArchive || forecastDate)
+                        if (dateMode === 'custom' && value !== 'custom') setPendingStart(period?.end || lastArchive)
                       }}>{t[value]}</button>
                     ))}
                   </div>
@@ -717,20 +693,16 @@ export default function EvolutionView({
                     else choosePreset(dateMode, pendingStart)
                   }}>
                     <label className="evo-field"><span>{dateMode === 'custom' ? t.from : t.day}</span>
-                      <input type="date" value={pendingStart} min={availableDates[0]} max={dateMode === 'week' || dateMode === 'month' ? lastArchive : availableDates.at(-1)}
+                      <input type="date" value={pendingStart} min={firstArchive} max={lastArchive}
                         required onChange={(event) => setPendingStart(event.target.value)} />
                     </label>
                     {dateMode === 'custom' && <label className="evo-field"><span>{t.to}</span>
-                      <input type="date" value={pendingEnd} min={pendingStart || availableDates[0]} max={availableDates.at(-1)} required onChange={(event) => setPendingEnd(event.target.value)} />
+                      <input type="date" value={pendingEnd} min={pendingStart || firstArchive} max={lastArchive} required onChange={(event) => setPendingEnd(event.target.value)} />
                     </label>}
-                    <button className="evo-primary" type="submit" disabled={periodInvalid || indexLoading || !availableDates.length}>{t.apply}</button>
+                    <button className="evo-primary" type="submit" disabled={periodInvalid || indexLoading || !archiveDates.length}>{t.apply}</button>
                     {periodInvalid && pendingStart && pendingEnd && <p className="evo-note" role="status">{t.periodError}</p>}
                   </form>
                   <p className="evo-note" title={t.rangeHint}>{indexError ? t.indexError : archiveLabel}</p>
-                  {forecastDate && <div className="evo-forecast-choice">
-                    <span>{t.forecastSection}</span>
-                    <button className="evo-text-button" type="button" onClick={() => choosePreset('day', forecastDate)}>{forecastDate === today ? t.forecastDay : t.latestForecast}</button>
-                  </div>}
                 </div>
               </details>
             </div>
@@ -755,9 +727,10 @@ export default function EvolutionView({
             </header>
             <div className="evo-map-canvas">
               <Suspense fallback={<div className="map-loading"><LoadingIndicator variant="compact" label={copy.loading} /></div>}>
-                <PortugalMap beaches={mapBeaches} districtWeather={[]} activeDate={mapDate} language={language} selectedId={scope === 'beaches' ? selectedIds[0] ?? '' : ''}
+                <PortugalMap beaches={mapBeaches} districtWeather={[]} activeDate={mapDate} language={language} selectedId={recordBeachId || (scope === 'beaches' ? selectedIds[0] ?? '' : '')}
                   territory={territory} theme={theme} windUnit={windUnit} mapMetric={metric} isMobile={isMobile} clusterRadius={36} clusterBaseZoom={6} clusterZoomRate={1.65}
-                  onSelect={selectMapBeach} onClusterSelect={(id) => addBeach(id)} onClearSelection={() => setSelectedIds([])} />
+                  onSelect={selectMapBeach} onClusterSelect={(id) => { setRecordFocus(null); addBeach(id) }}
+                  onClearSelection={() => { setRecordFocus(null); setSelectedIds([]) }} />
               </Suspense>
               <MapLegend language={language} metric={metric} windUnit={windUnit} />
               {(indexLoading || mapLoading) && <div className="map-loading"><LoadingIndicator variant="compact" label={copy.loading} /></div>}
@@ -810,31 +783,29 @@ export default function EvolutionView({
                     if (!active || !payload?.length) return null
                     const row = payload[0]?.payload as ChartPoint | undefined
                     if (!row) return null
-                    const kind = hourlyMode ? period && period.start < today ? 'history' : 'forecast' : row.date < today ? 'history' : 'forecast'
-                    if (kind === 'forecast' && !visibility.forecast) return null
-                    return <div className="evo-tooltip"><strong>{hourlyMode ? `${periodLabel} · ${label}` : formatDate(String(label), language, true)}</strong><small>{kind === 'history' ? t.dayKindArchive : t.dayKindForecast} · {unit}</small>
+                    return <div className="evo-tooltip"><strong>{hourlyMode ? `${periodLabel} · ${label}` : formatDate(String(label), language, true)}</strong><small>{t.dayKindArchive} · {unit}</small>
                       <table><thead><tr><th scope="col">{scope === 'territory' ? t.territoryAverage : t.beaches}</th>{enabledStatistics.map((statistic) => <th scope="col" key={statistic}>{statisticLabels[statistic]}</th>)}</tr></thead>
                         <tbody>{series.map((item) => <tr key={item.key}>
                           <th scope="row"><i style={{ background: item.color }} aria-hidden="true" />{item.name}</th>
                           {enabledStatistics.map((statistic) => {
-                            const value = row[`${kind}_${item.key}_${statistic}`]
+                            const value = row[`${item.key}_${statistic}`]
                             return <td key={statistic}>{typeof value === 'number' ? value.toFixed(1) : '—'}</td>
                           })}
                         </tr>)}</tbody>
                       </table>
                     </div>
                   }} />
-                  {enabledStatistics.includes('min') && enabledStatistics.includes('max') && series.flatMap((item) => kinds.map((kind) => (
-                   <Area key={`${kind}_${item.key}_range`} type="linear" dataKey={`${kind}_${item.key}_range`}
+                  {enabledStatistics.includes('min') && enabledStatistics.includes('max') && series.map((item) => (
+                   <Area key={`${item.key}_range`} type="linear" dataKey={`${item.key}_range`}
                      connectNulls={false} stroke="none" fill={item.color} fillOpacity={scope === 'territory' ? 0.12 : 0.055}
                      activeDot={false} isAnimationActive={false} />
-                  )))}
-                  {series.flatMap((item) => enabledStatistics.flatMap((statistic) => kinds.map((kind) => (
-                   <Line key={`${kind}_${item.key}_${statistic}`} dataKey={`${kind}_${item.key}_${statistic}_line`} type="linear" connectNulls={false} stroke={item.color}
-                     strokeWidth={statistic === 'min' ? 1.6 : 2.5} strokeDasharray={kind === 'forecast' ? '6 5' : statistic === 'min' ? '2 3' : undefined}
+                  ))}
+                  {series.flatMap((item) => enabledStatistics.map((statistic) => (
+                   <Line key={`${item.key}_${statistic}`} dataKey={`${item.key}_${statistic}_line`} type="linear" connectNulls={false} stroke={item.color}
+                     strokeWidth={statistic === 'min' ? 1.6 : 2.5} strokeDasharray={statistic === 'min' ? '2 3' : undefined}
                       dot={(props) => {
                         const index = props.index ?? 0
-                        const key = `${kind}_${item.key}_${statistic}_line`
+                        const key = `${item.key}_${statistic}_line`
                         const value = displayedChart[index]?.[key]
                         const isolated = typeof displayedChart[index - 1]?.[key] !== 'number' && typeof displayedChart[index + 1]?.[key] !== 'number'
                         return typeof value === 'number' && (displayedChart.length < 45 || isolated)
@@ -842,7 +813,7 @@ export default function EvolutionView({
                           : <g key={`${key}-${index}`} />
                       }}
                       activeDot={{ r: 5, fill: item.color }} isAnimationActive={false} />
-                  ))))}
+                  )))}
                   {!hourlyMode && mapDate && <ReferenceLine x={mapDate} stroke="var(--cp-text-muted)" strokeDasharray="3 3" strokeWidth={1.5} />}
                 </ComposedChart>
               </ResponsiveContainer>
@@ -851,35 +822,78 @@ export default function EvolutionView({
 
           {hasDates && !loading && !loadError && (
             <>
-              <ChartSeriesLegend language={language} visibility={visibility} statistics={statistics} showForecast={forecastCount > 0}
+              <ChartSeriesLegend language={language} visibility={visibility} statistics={statistics} showForecast={false}
                 help={`${readingHelp} ${t.legendHelp}`} onToggle={(key) => setVisibility((value) => ({ ...value, [key]: !value[key] }))} />
               {hourlyMode && !dailyAirFallback && <p className="evo-reading">{t.hourlyKey}{hourlyUtc ? ' · UTC' : ''}</p>}
               {missingHourlyAir.length > 0 && <p className="evo-note">
                 {language === 'pt' ? 'Sem ar horário' : 'No hourly air'}: {missingHourlyAir.map((beach) => uniqueShortBeachName(beach, dataset.beaches)).join(', ')}
               </p>}
-              {!hourlyMode && !hiddenSeries && <div className="evo-stats-scroll">
-                <table className="evo-stats" aria-label={t.periodSummary} title={scope === 'territory' ? t.territorySummary : t.beachSummary}>
-                  <thead><tr><th scope="col">{scope === 'territory' ? t.territoryAverage : t.beaches}</th>{enabledStatistics.map((statistic) => <th scope="col" key={statistic}>{statisticLabels[statistic]}</th>)}</tr></thead>
-                  <tbody>{summaries.map((summary) => <tr key={summary.id}>
-                      <th scope="row" title={`${summary.values.length} ${t.of} ${summaryDays} ${t.coverage}`}>
-                        <i style={{ background: summary.color }} aria-hidden="true" />{summary.name}
-                        {summary.values.length < summaryDays && <small>{summary.values.length}/{summaryDays} {t.coverage}</small>}
-                      </th>
-                      {enabledStatistics.map((statistic) => {
-                        const result = summarizeChartStatistic(summary.values, statistic)
-                        return <td key={statistic} title={`${result.date ? `${formatDate(result.date, language, true)} · ` : ''}${result.count}/${summaryDays} ${t.coverage}`}>{formatValue(result.value)}</td>
-                      })}
-                    </tr>)}</tbody>
-                </table>
+              {!hourlyMode && !hiddenSeries && <div className="evo-records" role="group" aria-label={t.periodSummary}
+                title={scope === 'territory' ? t.territorySummary : t.beachSummary}>
+                {summaries.map((summary) => <div className="evo-record" key={summary.id} role="group" aria-label={summary.name}
+                  data-comparison={summaries.length > 1} style={{ '--evo-record-colour': summary.color, '--evo-record-columns': enabledStatistics.length } as CSSProperties}>
+                  {summaries.length > 1 && <strong className="evo-record-name" title={summary.name}>
+                    <i aria-hidden="true" />{summary.name}
+                  </strong>}
+                  {enabledStatistics.map((statistic) => {
+                    const result = summarizeChartStatistic(summary.values, statistic)
+                    const content = <>
+                      <span>{statisticLabels[statistic]} <b title={formatValue(result.value)}>{result.value === undefined ? '—' : displayValue(result.value).toFixed(1)}</b></span>
+                      {result.date && <time dateTime={result.date}>{formatDate(result.date, language)}</time>}
+                    </>
+                    const coverage = `${result.count}/${summaryDays} ${t.coverage}`
+                    const recordDate = result.date
+                    return recordDate ? <button type="button" key={statistic} className="evo-record-value" data-statistic={statistic}
+                      title={`${t.recordDay} · ${formatDate(recordDate, language, true)} · ${coverage}`}
+                      aria-label={`${summary.name} · ${statisticLabels[statistic]} ${formatValue(result.value)} · ${formatDate(recordDate, language, true)} · ${t.recordDay}`}
+                      onClick={() => {
+                        const index = mapDates.indexOf(recordDate)
+                        if (index >= 0) setMapIndex(index)
+                      }}>{content}</button> : <div key={statistic} className="evo-record-value" data-statistic={statistic} title={coverage}>{content}</div>
+                  })}
+                  {summary.values.length < summaryDays && <small className="evo-record-coverage">{summary.values.length}/{summaryDays} {t.coverage}</small>}
+                </div>)}
               </div>}
               {partialError && <p className="evo-message" role="status">{t.partialError}<button type="button" onClick={() => setRetry((value) => value + 1)}>{t.retry}</button></p>}
             </>
           )}
-          {period && <footer className="evo-provenance" title={t.archiveNote} aria-label={`${provenance} · ${visibleDays} ${t.days}. ${t.archiveNote}`}>
-            <span>{provenance} · {visibleDays} {t.days} · {t.forecasts}</span>
+          {period && <footer className="evo-provenance" title={t.archiveNote} aria-label={`${visibleDays} ${t.days}. ${t.archiveNote}`}>
+            <span>{visibleDays} {t.days} · {t.forecasts}</span>
             {period.clipped && <span>{t.clipped}</span>}
             {Boolean(period.missingDays) && <span>{period.missingDays} {t.gap}</span>}
           </footer>}
+          {!singleDay && hasDates && !loading && !loadError && (visibility.max || visibility.min) && (
+            <section className="evo-location-records" aria-label={`${t.recordLocations} · ${t[metric]} · ${periodLabel}`}
+              title={language === 'pt'
+                ? `Preferimos concelhos diferentes quando a diferença não ultrapassa ${HIGHLIGHT_SIMILARITY.temperatureCelsius} °C ou ${HIGHLIGHT_SIMILARITY.windKnots} kn.`
+                : `Different municipalities when values are within ${HIGHLIGHT_SIMILARITY.temperatureCelsius} °C or ${HIGHLIGHT_SIMILARITY.windKnots} kn.`}>
+              {rankedRecords ? (['max', 'min'] as const).filter((direction) => visibility[direction]).map((direction) => (
+                <div className="evo-location-column" key={direction}>
+                  <h2>{direction === 'max' ? t.highest : t.lowest}<span>{unit}</span></h2>
+                  {rankedRecords[metric][direction].length ? rankedRecords[metric][direction].map((record) => {
+                    const beach = dataset.beaches.find((item) => item.id === record.beachId)
+                    const name = beach ? uniqueShortBeachName(beach, dataset.beaches) : `${copy.beach} ${record.beachId}`
+                    return <button type="button" key={record.beachId} className="evo-location-record"
+                      title={`${beach?.name ?? name} · ${beach?.municipality ?? ''} · ${beach?.district ?? ''} · ${formatDate(record.date, language, true)} · ${t.recordBeach}`}
+                      aria-label={`${beach?.name ?? name} · ${beach?.municipality ?? ''} · ${beach?.district ?? ''} · ${direction === 'max' ? t.maximum : t.minimum} ${formatValue(record.value)} · ${formatDate(record.date, language, true)} · ${t.recordBeach}`}
+                      onClick={() => {
+                        const index = mapDates.indexOf(record.date)
+                        if (index >= 0) {
+                          setMapIndex(index)
+                          setRecordFocus({ key: dataKey, metric, beachId: record.beachId })
+                          if (isMobile) document.querySelector('.evo-map-section')?.scrollIntoView({ block: 'nearest' })
+                        }
+                      }}>
+                      <span><strong>{beach?.name ?? name}</strong>
+                        {beach && <small>{beach.municipality} · {beach.district}</small>}
+                        <time dateTime={record.date}>{formatDate(record.date, language)}</time></span>
+                      <b>{displayValue(record.value).toFixed(1)}</b>
+                    </button>
+                  }) : <p className="evo-note">{t.noData}</p>}
+                </div>
+              )) : <p className="evo-note">{t.recordsUnavailable}</p>}
+            </section>
+          )}
         </section>
         </div>
 

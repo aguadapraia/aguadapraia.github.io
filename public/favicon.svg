@@ -1,17 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
   <style>
-    .sun { stroke: #f59e0b; }
+    .sun { stroke: #f59e0b; fill: #f59e0b; }
     .wave { stroke: #0078d4; }
     @media (prefers-color-scheme: dark) {
-      .sun { stroke: #fbbf24; }
+      .sun { stroke: #fbbf24; fill: #fbbf24; }
       .wave { stroke: #4da6ff; }
     }
   </style>
-  <defs><clipPath id="horizon"><path d="M0 0h32v20h-2C24 25 20 23 15 20C10 17 7 17 2 22H0Z"/></clipPath></defs>
+  <defs>
+    <path id="wave" d="M-54 22c5-5 9-5 14 0s9 5 14 0 9-5 14 0s9 5 14 0 9-5 14 0s9 5 14 0 9-5 14 0s9 5 14 0"/>
+    <clipPath id="horizon"><path d="M-54 22c5-5 9-5 14 0s9 5 14 0 9-5 14 0s9 5 14 0 9-5 14 0s9 5 14 0 9-5 14 0s9 5 14 0V0H-54Z"/></clipPath>
+    <clipPath id="window"><rect x="1" y="16" width="30" height="16" rx="1"/></clipPath>
+  </defs>
   <g clip-path="url(#horizon)" class="sun" stroke-width="2" stroke-linecap="round">
     <circle cx="16" cy="17" r="7"/>
-    <path d="M16 3v3M6.5 7.5l2.1 2.1M25.5 7.5l-2.1 2.1"/>
+    <path d="M16 3v3M6.5 7.5l2.1 2.1M25.5 7.5l-2.1 2.1M2 16h3M30 16h-3"/>
   </g>
-  <path class="wave" d="M2 22C7 17 10 17 15 20S24 25 30 20" stroke-width="2" stroke-linecap="round"/>
-  <path class="wave" d="M2 28C7 23 10 23 15 26S24 31 30 26" stroke-width="2" stroke-linecap="round" opacity=".55"/>
+  <g class="wave" clip-path="url(#window)" stroke-width="2" stroke-linecap="round" fill="none">
+    <use href="#wave"/>
+    <use href="#wave" transform="translate(0 6)" opacity=".55"/>
+  </g>
 </svg>

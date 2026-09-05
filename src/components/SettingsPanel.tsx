@@ -1,8 +1,10 @@
 import {
+  Check,
   Languages,
   Moon,
   Settings,
   Sun,
+  SunMoon,
   Wind,
   X,
   type LucideIcon,
@@ -17,25 +19,25 @@ interface SettingsPanelProps {
   isMobile?: boolean
 }
 
-interface SegmentRowProps {
+interface SegmentRowProps<Value extends string> {
   label: string
   icon: LucideIcon
-  value: string
-  options: Array<{ value: string; label: string }>
-  onChange: (value: string) => void
+  value: Value
+  options: Array<{ value: Value; label: string; icon?: LucideIcon }>
+  onChange: (value: Value) => void
 }
 
-function SegmentRow({
+function SegmentRow<Value extends string>({
   label,
   icon: Icon,
   value,
   options,
   onChange,
-}: SegmentRowProps) {
+}: SegmentRowProps<Value>) {
   return (
     <div className="sp-segment" role="group" aria-label={label}>
-      <span className="sp-segment-icon" title={label}>
-        <Icon size={15} aria-hidden="true" />
+      <span className="sp-segment-label">
+        <Icon size={16} aria-hidden="true" />{label}
       </span>
       <div>
         {options.map((option) => (
@@ -46,7 +48,9 @@ function SegmentRow({
             aria-pressed={value === option.value}
             onClick={() => onChange(option.value)}
           >
-            {option.label}
+            <span className="sp-choice-mark" aria-hidden="true">
+              {value === option.value ? <Check size={14} /> : option.icon ? <option.icon size={14} /> : null}
+            </span>{option.label}
           </button>
         ))}
       </div>
@@ -59,10 +63,6 @@ export default function SettingsPanel({ settings, onSettingsChange, isMobile = f
   const panelRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const copy = getCopy(settings.language)
-  const themeActionLabel =
-    settings.theme === 'light'
-      ? copy.switchToDarkTheme
-      : copy.switchToLightTheme
 
   function set<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     onSettingsChange({ ...settings, [key]: value })
@@ -122,27 +122,26 @@ export default function SettingsPanel({ settings, onSettingsChange, isMobile = f
             role="dialog"
             aria-label={copy.settingsTitle}
             aria-modal="true"
-            className={isMobile ? 'sp-panel sp-panel--sheet' : 'sp-panel'}
+            className={isMobile ? 'sp-panel sp-panel--mobile' : 'sp-panel'}
           >
             <div className="sp-title-row">
               <p className="sp-title">{copy.settingsTitle}</p>
-              <button
-                type="button"
-                className="sp-theme"
-                aria-label={themeActionLabel}
-                data-tooltip={themeActionLabel}
-                onClick={() =>
-                  set('theme', settings.theme === 'light' ? 'dark' : 'light')
-                }
-              >
-                {settings.theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
-              </button>
-              <button type="button" className="sp-theme" aria-label={copy.close} onClick={close}>
+              <button type="button" className="sp-close" aria-label={copy.close} onClick={close}>
                 <X size={16} />
               </button>
             </div>
 
-            <SegmentRow
+            <SegmentRow<AppSettings['theme']>
+              label={copy.theme}
+              icon={SunMoon}
+              value={settings.theme}
+              options={[
+                { value: 'light', label: copy.lightTheme, icon: Sun },
+                { value: 'dark', label: copy.darkTheme, icon: Moon },
+              ]}
+              onChange={(value) => set('theme', value)}
+            />
+            <SegmentRow<AppSettings['language']>
               label={copy.language}
               icon={Languages}
               value={settings.language}
@@ -150,21 +149,17 @@ export default function SettingsPanel({ settings, onSettingsChange, isMobile = f
                 { value: 'pt', label: 'PT' },
                 { value: 'en', label: 'EN' },
               ]}
-              onChange={(value) =>
-                set('language', value as AppSettings['language'])
-              }
+              onChange={(value) => set('language', value)}
             />
-            <SegmentRow
-              label={copy.windUnit}
+            <SegmentRow<AppSettings['windUnit']>
+              label={copy.wind}
               icon={Wind}
               value={settings.windUnit}
               options={[
                 { value: 'kmh', label: 'km/h' },
                 { value: 'knots', label: 'kn' },
               ]}
-              onChange={(value) =>
-                set('windUnit', value as AppSettings['windUnit'])
-              }
+              onChange={(value) => set('windUnit', value)}
             />
           </div>
         </>

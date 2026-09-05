@@ -48,6 +48,10 @@ import {
   fitMapProjection,
   groupMapPoints,
   mapFitExtent,
+  mapMarkerGeometry,
+  mapMarkerRadius,
+  mapMarkerScale,
+  mapMarkerValueSize,
   prepareDistricts,
   type MapSize,
 } from '../lib/map-layout'
@@ -76,6 +80,13 @@ interface PortugalMapProps {
 }
 
 const maxZoom = 16
+interface ClusterAction {
+  id: string
+  previousSelection: string
+  territory: TerritoryFilter
+  keyboard: boolean
+}
+
 const motionDuration = (duration: number) =>
   window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : duration
 
@@ -187,10 +198,12 @@ export default function PortugalMap({
   const transformRef = useRef<ZoomTransform>(zoomIdentity)
   const previousLayoutRef = useRef<{ projection: GeoProjection; size: MapSize; territory: TerritoryFilter } | null>(null)
   const focusedSelectionRef = useRef('')
-  const clusterSelectedRef = useRef('')
   const clusterChoicesRef = useRef('')
+  const pendingClusterRef = useRef<ClusterAction | null>(null)
+  const markerElementsRef = useRef(new Map<string, SVGGElement>())
   const clusterTriggerRef = useRef<SVGGElement | null>(null)
   const clusterCloseRef = useRef<HTMLButtonElement>(null)
+  const focusClusterRef = useRef(false)
   const clusterTitleId = useId()
   const [districts, setDistricts] =
     useState<FeatureCollection<Geometry> | null>(null)
@@ -199,7 +212,8 @@ export default function PortugalMap({
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [transform, setTransform] = useState<ZoomTransform>(zoomIdentity)
   const [viewport, setViewport] = useState({ width: mapWidth, height: mapHeight, measured: false })
-  const [openClusterIds, setOpenClusterIds] = useState<string[]>([])
+  const [readyCluster, setReadyCluster] = useState<ClusterAction | null>(null)
+  const [popupAnchorId, setPopupAnchorId] = useState('')
   const beachesById = useMemo(() => new Map(beaches.map((beach) => [beach.id, beach])), [beaches])
   const copy = getCopy(language)
   const metricLabel = mapMetric === 'air'
@@ -328,22 +342,14 @@ export default function PortugalMap({
     })
   }, [beaches, projection, territory, transform.k])
   const markerGroups = useMemo(() =>
-    groupMapPoints(projectedBeaches, effectiveClusterRadius, selectedId)
+    groupMapPoints(projectedBeaches, effectiveClusterRadius, selectedId, transform.k)
       .sort((a, b) => Number(a.anchor.id === selectedId) - Number(b.anchor.id === selectedId)),
-  [projectedBeaches, effectiveClusterRadius, selectedId])
-  useEffect(() => {
-    if (clusterSelectedRef.current !== selectedId) {
-      clusterSelectedRef.current = ''
-      return
-    }
-    if (!selectedId || !onClusterSelect || !clusterChoicesInline) return
-    const ids = clusterChoiceIds(markerGroups, selectedId, transform.k >= maxZoom)
-    const key = ids.join(',')
-    if (key !== clusterChoicesRef.current) {
-      clusterChoicesRef.current = key
-      onClusterSelect(selectedId, ids, false)
-    }
-  }, [clusterChoicesInline, markerGroups, onClusterSelect, selectedId, transform.k])
+  [projectedBeaches, effectiveClusterRadius, selectedId, transform.k])
+  const visibleMarkerGroups = markerGroups.filter(({ anchor }) => {
+    const x = anchor.x + transform.x
+    const y = anchor.y + transform.y
+    return x >= -30 && y >= -30 && x <= viewport.width + 30 && y <= viewport.height + 30
+  })
   const weatherMarkers = useMemo(() => {
     if (!projection) return []
     const candidates = [...activeWeather].sort((a, b) => a.locationId - b.locationId).flatMap((weather) => {
@@ -354,19 +360,22 @@ export default function PortugalMap({
       const [x, y] = transform.apply(point)
       return [{ weather, x, y }]
     })
-    const obstacles = markerGroups.map(({ anchor }) => ({
-      x: anchor.x + transform.x, y: anchor.y + transform.y, width: 48, height: 48,
-    }))
+    const obstacles = markerGroups.map(({ anchor, points }) => {
+      const diameter = mapMarkerRadius(anchor.id === selectedId, transform.k, points.length > 1) * 2
+      return { x: anchor.x + transform.x, y: anchor.y + transform.y, width: diameter, height: diameter }
+    })
     obstacles.push(
       { x: viewport.width / 2, y: viewport.height - 24, width: viewport.width, height: 48 },
       { x: viewport.width - 34, y: viewport.height - 86, width: 60, height: 160 },
     )
     return placeWeatherBadges(candidates, viewport, obstacles, isMobile ? 12 : 8)
-  }, [activeWeather, districts, isMobile, markerGroups, projection, transform, viewport])
+  }, [activeWeather, districts, isMobile, markerGroups, projection, selectedId, transform, viewport])
   const hoveredBeach = hoveredId ? beachesById.get(hoveredId) : undefined
-  const markerSize = 1.14 + Math.min(0.12, Math.log2(transform.k) * 0.04)
-  const markerScale = markerSize / transform.k
+  const markerScreenScale = mapMarkerScale(transform.k)
+  const markerScale = markerScreenScale / transform.k
+  const markerFontSize = mapMarkerValueSize(transform.k) / markerScreenScale
   const weatherMarkerScale = 1 / transform.k
+  const openClusterIds = clusterChoicesInline ? [] : clusterChoiceIds(markerGroups, popupAnchorId)
   const clusterBeaches = openClusterIds.flatMap((id) => {
     const beach = beachesById.get(id)
     return beach && (territory === 'all' || beach.territory === territory) ? [beach] : []
@@ -392,13 +401,17 @@ export default function PortugalMap({
       .on('zoom', (event) => {
         transformRef.current = event.transform
         setTransform(event.transform)
-        if (event.sourceEvent) setOpenClusterIds((current) => current.length ? [] : current)
+        if (event.sourceEvent) {
+          pendingClusterRef.current = null
+          setReadyCluster(null)
+        }
       })
     zoomBehaviorRef.current = behavior
     previousLayoutRef.current = { projection, size: viewport, territory }
     select(svg).interrupt().call(behavior).call(behavior.transform, nextTransform)
     if (previous?.territory !== territory) {
-      setOpenClusterIds([])
+      setPopupAnchorId('')
+      focusClusterRef.current = false
       setHoveredId(null)
     }
     return () => {
@@ -406,6 +419,48 @@ export default function PortugalMap({
       zoomBehaviorRef.current = null
     }
   }, [projection, territory, viewport])
+
+  useLayoutEffect(() => {
+    const pending = pendingClusterRef.current
+    if (pending && (pending.previousSelection !== selectedId || pending.territory !== territory)) {
+      pendingClusterRef.current = null
+      setReadyCluster(null)
+      if (svgRef.current) select(svgRef.current).interrupt()
+    }
+  }, [selectedId, territory])
+
+  // Publish from the committed layout, never from a transition's captured props.
+  // A nearby choice or external selection then becomes the new grouping anchor.
+  useLayoutEffect(() => {
+    if (readyCluster && pendingClusterRef.current === readyCluster) {
+      pendingClusterRef.current = null
+      setReadyCluster(null)
+      if (!projectedBeaches.some((point) => point.id === readyCluster.id)) return
+      const groups = groupMapPoints(projectedBeaches, effectiveClusterRadius, readyCluster.id, transform.k)
+      const ids = clusterChoiceIds(groups, readyCluster.id)
+      focusedSelectionRef.current = readyCluster.id
+      clusterChoicesRef.current = `${readyCluster.id}:${ids.join(',')}`
+      if (onClusterSelect) onClusterSelect(readyCluster.id, ids, readyCluster.keyboard)
+      else if (readyCluster.id !== selectedId) onSelect(readyCluster.id)
+      if (!clusterChoicesInline) {
+        focusClusterRef.current = ids.length > 1
+        setPopupAnchorId(readyCluster.id)
+      }
+      return
+    }
+    if (pendingClusterRef.current) return
+    if (!clusterChoicesInline || !selectedId || !onClusterSelect) {
+      clusterChoicesRef.current = ''
+      return
+    }
+    if (!projectedBeaches.some((point) => point.id === selectedId)) return
+    const ids = clusterChoiceIds(markerGroups, selectedId)
+    const key = `${selectedId}:${ids.join(',')}`
+    if (key !== clusterChoicesRef.current) {
+      clusterChoicesRef.current = key
+      onClusterSelect(selectedId, ids, false)
+    }
+  }, [clusterChoicesInline, effectiveClusterRadius, markerGroups, onClusterSelect, onSelect, projectedBeaches, readyCluster, selectedId, transform.k])
 
   useLayoutEffect(() => {
     if (!selectedId) {
@@ -430,15 +485,23 @@ export default function PortugalMap({
     select(svg).interrupt().transition().duration(motionDuration(360)).call(behavior.transform, target)
   }, [beachesById, projection, selectedId, territory, viewport])
 
-  useEffect(() => {
-    if (openClusterIds.length) clusterCloseRef.current?.focus()
-  }, [openClusterIds])
+  useLayoutEffect(() => {
+    if (clusterBeaches.length && focusClusterRef.current) {
+      focusClusterRef.current = false
+      clusterCloseRef.current?.focus()
+    }
+  }, [clusterBeaches.length, popupAnchorId, readyCluster])
+
+  function cancelClusterAction() {
+    pendingClusterRef.current = null
+    setReadyCluster(null)
+  }
 
   function animateScale(factor: number) {
     const svg = svgRef.current
     const behavior = zoomBehaviorRef.current
     if (!svg || !behavior) return
-    setOpenClusterIds([])
+    cancelClusterAction()
     select(svg).interrupt().transition().duration(motionDuration(240)).call(behavior.scaleBy, factor)
   }
 
@@ -446,7 +509,7 @@ export default function PortugalMap({
     const svg = svgRef.current
     const behavior = zoomBehaviorRef.current
     if (!svg || !behavior) return
-    setOpenClusterIds([])
+    cancelClusterAction()
     select(svg)
       .interrupt()
       .transition()
@@ -455,9 +518,24 @@ export default function PortugalMap({
   }
 
   function closeCluster() {
-    setOpenClusterIds([])
-    if (clusterTriggerRef.current?.isConnected) clusterTriggerRef.current.focus()
+    setPopupAnchorId('')
+    focusClusterRef.current = false
+    const anchor = markerGroups.find((group) => group.points.some((point) => point.id === popupAnchorId))?.anchor.id
+    const marker = anchor && markerElementsRef.current.get(anchor)
+    if (marker) marker.focus()
+    else if (clusterTriggerRef.current?.isConnected) clusterTriggerRef.current.focus()
     else svgRef.current?.focus()
+  }
+
+  function activateMarker(points: typeof projectedBeaches, trigger: SVGGElement, keyboard = false) {
+    if (points.length > 1) {
+      activateCluster(points, trigger, keyboard)
+    } else if (points.length) {
+      cancelClusterAction()
+      if (svgRef.current) select(svgRef.current).interrupt()
+      setPopupAnchorId('')
+      onSelect(points[0].id)
+    }
   }
 
   function activateCluster(points: typeof projectedBeaches, trigger: SVGGElement, keyboard: boolean) {
@@ -474,28 +552,25 @@ export default function PortugalMap({
         viewport.height / 2 - chosen.point[1] * scale,
       )
       .scale(scale)
+    select(svg).interrupt()
+    const action = { id: chosen.id, previousSelection: selectedId, territory, keyboard }
+    pendingClusterRef.current = action
+    setReadyCluster(null)
     clusterTriggerRef.current = trigger
-    setOpenClusterIds([])
+    setPopupAnchorId('')
     setHoveredId(null)
     select(svg)
-      .interrupt()
       .transition()
       .duration(motionDuration(280))
       .call(behavior.transform, target)
       .on('end.cluster', () => {
-        const radius = adaptiveClusterRadius(clusterRadius,
-          2 ** (clusterZoomLevel(scale, 1, clusterBaseZoom, clusterZoomRate) - clusterBaseZoom), 1)
-        const groups = groupMapPoints(projectedBeaches.map((item) => ({
-          ...item, x: item.point[0] * scale, y: item.point[1] * scale,
-        })), radius, chosen.id)
-        const ids = clusterChoiceIds(groups, chosen.id, scale >= maxZoom)
-        focusedSelectionRef.current = chosen.id
-        if (onClusterSelect) {
-          clusterSelectedRef.current = chosen.id
-          clusterChoicesRef.current = ids.join(',')
-          onClusterSelect(chosen.id, ids, keyboard)
-        } else if (chosen.id !== selectedId) onSelect(chosen.id)
-        if (!clusterChoicesInline) setOpenClusterIds(ids)
+        if (pendingClusterRef.current === action) setReadyCluster(action)
+      })
+      .on('interrupt.cluster cancel.cluster', () => {
+        if (pendingClusterRef.current === action) {
+          pendingClusterRef.current = null
+          setReadyCluster(null)
+        }
       })
   }
 
@@ -540,8 +615,9 @@ export default function PortugalMap({
           ) {
             return
           }
+          cancelClusterAction()
           select(event.currentTarget).interrupt()
-          setOpenClusterIds([])
+          setPopupAnchorId('')
           onClearSelection()
         }}
       >
@@ -604,10 +680,22 @@ export default function PortugalMap({
             )
           })}
 
-          {markerGroups.map(({ anchor, points }) => {
+          <g aria-hidden="true">
+            {visibleMarkerGroups.map(({ anchor, points }) => (
+              <circle key={anchor.id} className={points.length > 1 ? 'cluster-hit' : 'beach-hit'}
+                cx={anchor.point[0]} cy={anchor.point[1]} r={22 / transform.k}
+                onMouseEnter={() => setHoveredId(points.length > 1 ? null : anchor.id)}
+                onMouseLeave={() => setHoveredId(null)}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  const marker = markerElementsRef.current.get(anchor.id)
+                  if (marker) activateMarker(points, marker)
+                }} />
+            ))}
+          </g>
+
+          {visibleMarkerGroups.map(({ anchor, points }) => {
             const { beach, point } = anchor
-            const [screenX, screenY] = transform.apply(point)
-            if (screenX < -30 || screenY < -30 || screenX > viewport.width + 30 || screenY > viewport.height + 30) return null
             const forecast = forecastForDate(beach, activeDate)
             const selected = beach.id === selectedId
             const isCluster = points.length > 1
@@ -617,17 +705,14 @@ export default function PortugalMap({
                 return isPreferredMetricValue(value, best, mapMetric) ? value : best
               }, Number.NaN)
               : getDisplayValue(forecast)
-            const activate = (trigger: SVGGElement, keyboard = false) => {
-              if (isCluster) {
-                activateCluster(points, trigger, keyboard)
-              } else {
-                setOpenClusterIds([])
-                onSelect(beach.id)
-              }
-            }
             return (
               <g
                 key={beach.id}
+                ref={(element) => {
+                  if (element) markerElementsRef.current.set(beach.id, element)
+                  else markerElementsRef.current.delete(beach.id)
+                }}
+                data-beach-id={beach.id}
                 className={`${isCluster ? 'svg-beach-cluster' : 'svg-beach-marker'}${selected && isCluster ? ' svg-beach-marker' : ''} ${displayMetricClass(
                   displayValue,
                   mapMetric,
@@ -648,23 +733,26 @@ export default function PortugalMap({
                 onBlur={() => setHoveredId(null)}
                 onClick={(event) => {
                   event.stopPropagation()
-                  activate(event.currentTarget)
+                  activateMarker(points, event.currentTarget)
                 }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault()
-                    activate(event.currentTarget, true)
+                    activateMarker(points, event.currentTarget, true)
                   }
                 }}
               >
-                <circle className={isCluster ? 'cluster-hit' : 'beach-hit'} r={22 / markerSize} />
-                <circle className={isCluster ? 'cluster-dot' : 'beach-dot'} r={selected ? 15 : isCluster ? 14 : 12.5} />
-                <text className={isCluster ? 'cluster-temperature' : 'beach-temperature'} textAnchor="middle" y={3.4}>
+                <circle className={isCluster ? 'cluster-dot' : 'beach-dot'}
+                  r={selected ? mapMarkerGeometry.selectedRadius : mapMarkerGeometry.radius} />
+                <text className={isCluster ? 'cluster-temperature' : 'beach-temperature'}
+                  textAnchor="middle" y={6 / markerScreenScale} style={{ fontSize: markerFontSize }}>
                   {markerValue(displayValue)}
                 </text>
                 {isCluster && <>
-                  <circle className="cluster-indicator" cx={10} cy={-10} r={6} />
-                  <text className="cluster-count" textAnchor="middle" x={10} y={-8.2}>
+                  <circle className="cluster-indicator" cx={mapMarkerGeometry.indicatorX}
+                    cy={mapMarkerGeometry.indicatorY} r={mapMarkerGeometry.indicatorRadius} />
+                  <text className="cluster-count" textAnchor="middle"
+                    x={mapMarkerGeometry.indicatorX} y={mapMarkerGeometry.indicatorY + 2.8}>
                     {points.length}
                   </text>
                 </>}
@@ -733,6 +821,11 @@ export default function PortugalMap({
               <X size={18} />
             </button>
           </header>
+          <p className="map-cluster-hint">
+            {transform.k < maxZoom
+              ? language === 'pt' ? 'Aproxima o mapa para reduzir as opções.' : 'Zoom in to narrow the choices.'
+              : language === 'pt' ? 'Escolhe uma praia deste grupo.' : 'Choose a beach from this group.'}
+          </p>
           <ul>
             {clusterBeaches.map((beach) => {
               const forecast = forecastForDate(beach, activeDate)

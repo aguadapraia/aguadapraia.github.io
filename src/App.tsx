@@ -42,6 +42,11 @@ export default function App() {
   const [nearbyIds, setNearbyIds] = useState<string[]>([])
   const focusNearby = useRef(false)
   const [historyBeachId, setHistoryBeachId] = useState<string | undefined>()
+  const [historyOrigin, setHistoryOrigin] = useState<'map' | 'table' | null>(null)
+  const historyTrigger = useRef<HTMLElement | null>(null)
+  const historyViewport = useRef({ width: 0, height: 0 })
+  const historyScroll = useRef<{ element: HTMLElement; top: number; left: number }[]>([])
+  const returningFromHistory = useRef(false)
   const [viewMode, setViewMode] = useState<AppViewMode>(() => viewFromPath(window.location.pathname))
   const [mobileLayout, setMobileLayout] = useState(() => window.matchMedia('(max-width: 760px)').matches)
 
@@ -69,6 +74,22 @@ export default function App() {
   useEffect(() => { document.documentElement.lang = language }, [language])
   useEffect(() => { saveSettings(settings) }, [settings])
   useEffect(() => {
+    const root = document.documentElement
+    const pointer = () => { root.dataset.inputMode = 'pointer' }
+    const keyboard = (event: KeyboardEvent) => {
+      if (!event.metaKey && !event.ctrlKey && !event.altKey &&
+        ['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' '].includes(event.key)) {
+        root.dataset.inputMode = 'keyboard'
+      }
+    }
+    document.addEventListener('pointerdown', pointer, true)
+    document.addEventListener('keydown', keyboard, true)
+    return () => {
+      document.removeEventListener('pointerdown', pointer, true)
+      document.removeEventListener('keydown', keyboard, true)
+    }
+  }, [])
+  useEffect(() => {
     if (focusNearby.current && selectedId) {
       focusNearby.current = false
       document.querySelector<HTMLElement>(nearbyIds.length > 1 ? '.beach-nearby select' : '#beach-detail-title')?.focus()
@@ -82,13 +103,34 @@ export default function App() {
   }, [])
   useEffect(() => {
     const handlePopState = () => {
-      setViewMode(viewFromPath(window.location.pathname))
-      setSelectedId(null)
-      setNearbyIds([])
+      const nextView = viewFromPath(window.location.pathname)
+      const origin = window.history.state?.returnView
+      if (nextView === 'evolution') captureHistoryOrigin()
+      returningFromHistory.current = viewMode === 'evolution' && nextView === historyOrigin
+      setHistoryOrigin(nextView === 'evolution' && (origin === 'map' || origin === 'table') ? origin : null)
+      if (nextView === 'evolution') {
+        const id = window.history.state?.beachId
+        setHistoryBeachId(typeof id === 'string' ? id : undefined)
+      } else if (!returningFromHistory.current) {
+        historyTrigger.current = null
+        historyScroll.current = []
+      }
+      setViewMode(nextView)
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
-  }, [])
+  }, [historyOrigin, viewMode])
+  useEffect(() => {
+    if (viewMode === 'evolution' || !returningFromHistory.current) return
+    returningFromHistory.current = false
+    const frame = requestAnimationFrame(() => {
+      for (const { element, top, left } of historyScroll.current) element.scrollTo({ top, left })
+      historyTrigger.current?.focus({ preventScroll: true })
+      historyTrigger.current = null
+      historyScroll.current = []
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [viewMode])
   useEffect(() => {
     const label = viewMode === 'map' ? copy.mapView : viewMode === 'table' ? copy.tableView : copy.evolutionView
     const title = `${label} - ÁguaDaPraia`
@@ -120,6 +162,11 @@ export default function App() {
     setNearbyIds([])
   }
   function navigateToView(view: AppViewMode) {
+    if (view === viewMode) return
+    if (viewMode === 'evolution' && view === historyOrigin) { returnFromHistory(); return }
+    historyTrigger.current = null
+    historyScroll.current = []
+    setHistoryOrigin(null)
     setViewMode(view)
     if (view !== 'map') { setSelectedId(null); setNearbyIds([]) }
     const path = pathForView(view)
@@ -131,8 +178,31 @@ export default function App() {
     setNearbyIds(nearby)
   }
   function exploreHistory(beach?: BeachViewModel) {
+    if (viewMode === 'evolution') return
+    captureHistoryOrigin()
+    setHistoryOrigin(viewMode)
     setHistoryBeachId(beach?.id)
-    navigateToView('evolution')
+    setViewMode('evolution')
+    window.history.pushState({ returnView: viewMode, beachId: beach?.id }, '', pathForView('evolution'))
+  }
+  function captureHistoryOrigin() {
+    const main = document.getElementById('app-content')
+    if (!main) return
+    const { width, height } = main.getBoundingClientRect()
+    // Keep the previous map and charts at their measured size while history is open.
+    historyViewport.current = { width, height }
+    historyTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    historyScroll.current = [main, ...main.querySelectorAll<HTMLElement>('.beach-sidebar-body, .beach-table-scroll, .beach-hourly-scroll')]
+      .map((element) => ({ element, top: element.scrollTop, left: element.scrollLeft }))
+  }
+  function returnFromHistory() {
+    if (historyOrigin && window.history.state?.returnView === historyOrigin) {
+      window.history.back()
+    } else {
+      setHistoryOrigin(null)
+      setViewMode('map')
+      window.history.replaceState(null, '', pathForView('map'))
+    }
   }
   function closeBeachDetails() {
     setSelectedId(null)
@@ -174,7 +244,7 @@ export default function App() {
             if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
             event.preventDefault(); setSelectedId(null); navigateToView('map')
           }}>
-          <span className="brand-mark"><BrandMark size={44} /></span><span>ÁguaDaPraia</span>
+          <span className="brand-mark"><BrandMark size={44} animate /></span><span>ÁguaDaPraia</span>
         </a>
         <nav className="beach-navigation" aria-label={copy.viewNavigation}>
           {navigation.map(({ view, label, icon: Icon }) => <a key={view}
@@ -195,8 +265,10 @@ export default function App() {
         {pt ? 'Ainda não há previsão atualizada para hoje. Estás a ver a última data publicada.' : 'Today’s forecast is not available yet. Showing the last published date.'}
       </p>}
 
-      {viewMode === 'map' ? (
-        <main id="app-content" tabIndex={-1} className="map-stage beach-map-layout">
+      {(viewMode === 'map' || historyOrigin === 'map') && (
+        <main id={viewMode === 'map' ? 'app-content' : undefined} data-suspended={viewMode !== 'map'} inert={viewMode !== 'map'}
+          aria-hidden={viewMode !== 'map'} style={viewMode !== 'map' ? historyViewport.current : undefined}
+          tabIndex={-1} className="map-stage beach-map-layout">
             <MapDiscovery beaches={dataset.beaches} activeDate={activeDate} territory={territory} selectedBeach={selectedBeach}
               language={language} windUnit={windUnit} metric={mapMetric}
               onMetricChange={(metric) => setSettings((current) => ({ ...current, mapMetric: metric }))}
@@ -244,9 +316,11 @@ export default function App() {
             <MapLegend language={language} metric={mapMetric} windUnit={windUnit} />
           </div>
         </main>
-      ) : viewMode === 'table' ? (
+      )}
+      {(viewMode === 'table' || historyOrigin === 'table') && (
         <Suspense fallback={<main className="beach-view-loading"><LoadingIndicator label={copy.loading} /></main>}>
         <BeachTableView beaches={territoryBeaches} activeDate={activeDate} language={language}
+          suspendedSize={viewMode !== 'table' ? historyViewport.current : undefined}
           windUnit={windUnit} onSelect={(beach) => { navigateToView('map'); selectBeach(beach) }}
           onExploreHistory={exploreHistory}
           territoryControl={<TerritorySelect value={territory} language={language} onChange={updateTerritory} />}
@@ -258,12 +332,13 @@ export default function App() {
            })}
           </select>} />
         </Suspense>
-      ) : (
+      )}
+      {viewMode === 'evolution' && (
         <Suspense fallback={<main className="beach-view-loading"><LoadingIndicator label={copy.loadingHistory} /></main>}>
           <EvolutionView key={historyBeachId ?? 'territory'} dataset={dataset} language={language}
-            windUnit={windUnit} theme={theme} territory={territory} onTerritoryChange={updateTerritory}
+            windUnit={windUnit} theme={theme} initialTerritory={territory}
             initialMapMetric={mapMetric} initialBeachId={historyBeachId}
-            onMapMetricChange={(metric) => setSettings((current) => ({ ...current, mapMetric: metric }))} />
+            onReturn={returnFromHistory} returnLabel={historyOrigin === 'table' ? copy.backToTable : copy.backToMap} />
         </Suspense>
       )}
 

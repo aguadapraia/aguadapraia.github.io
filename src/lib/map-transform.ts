@@ -40,7 +40,7 @@ export function clusterZoomLevel(
     16,
     Math.max(
       0,
-      Math.round(Math.log2(scale / initialScale) * zoomRate + baseZoom),
+      Math.log2(scale / initialScale) * zoomRate + baseZoom,
     ),
   )
 }
@@ -51,5 +51,5 @@ export function adaptiveClusterRadius(
   initialScale: number,
 ): number {
   const zoomSteps = Math.max(0, Math.log2(scale / initialScale))
-  return Math.max(32, Math.min(44, baseRadius) - zoomSteps * 2)
+  return Math.max(0, Math.min(44, baseRadius) - zoomSteps * 2)
 }

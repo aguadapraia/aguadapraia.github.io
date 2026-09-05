@@ -4,6 +4,7 @@ import BeachDetailPanel from './BeachDetailPanel'
 import { getCopy, type Language } from '../i18n'
 import { forecastForDate, forecastHighlights, nearestBeach } from '../lib/beach-discovery'
 import { normalizeBeachSearch } from '../lib/beach-search'
+import { HIGHLIGHT_SIMILARITY } from '../lib/highlight-policy'
 import { formatWind, type WindUnit } from '../lib/units'
 import type { BeachViewModel, MapMetric, TerritoryFilter } from '../types'
 
@@ -194,15 +195,14 @@ export default function MapDiscovery({
       <div className="beach-forecast-toolbar">{controls}</div>
       {locationMessage && <p role="status" className="beach-location-message">{locationMessage}</p>}
       </div>
-      {selectedBeach ? <BeachDetailPanel key={selectedBeach.id} name={selectedBeach.name}
-        location={`${selectedBeach.municipality} · ${selectedBeach.district}`} date={activeDate}
+      {selectedBeach ? <BeachDetailPanel key={selectedBeach.id} beach={selectedBeach} date={activeDate}
         language={language} scrollRef={bodyRef}>
         {children}
       </BeachDetailPanel> : <div className="beach-sidebar-body" ref={bodyRef}>
       <section className="beach-highlights" aria-label={pt ? 'Destaques do dia' : 'Daily highlights'}>
         <h2 title={pt
-          ? 'Concelhos distintos; repetimos um concelho apenas com mais de 1 °C de diferença. O catálogo não inclui freguesias.'
-          : 'Different municipalities; repeated only with more than 1 °C difference. Parish data is not available.'}>
+          ? `Preferimos concelhos diferentes quando a diferença não ultrapassa ${HIGHLIGHT_SIMILARITY.temperatureCelsius} °C ou ${HIGHLIGHT_SIMILARITY.windKnots} kn.`
+          : `Different municipalities when values are within ${HIGHLIGHT_SIMILARITY.temperatureCelsius} °C or ${HIGHLIGHT_SIMILARITY.windKnots} kn.`}>
           {pt ? 'Destaques' : 'Highlights'}<span>{scope.length} {pt ? 'praias' : 'beaches'}</span>
         </h2>
         <div className="beach-highlight-cards" id="discovery-highlights">
@@ -216,8 +216,8 @@ export default function MapDiscovery({
                 <span className="highlight-mobile-label" title={heading}>{label}</span>
               </h3>
               {items.map((item) => <button type="button" key={item.beach.id}
-                title={`${heading} · ${item.beach.name} · ${item.beach.municipality}`} onClick={() => chooseBeach(item.beach)}>
-                <span><strong>{item.beach.name}</strong><small>{item.beach.municipality}</small></span>
+                title={`${heading} · ${item.beach.name} · ${item.beach.municipality} · ${item.beach.district}`} onClick={() => chooseBeach(item.beach)}>
+                <span><strong>{item.beach.name}</strong><small>{item.beach.municipality} · {item.beach.district}</small></span>
                 <b><Icon className="highlight-value-icon" size={14} aria-hidden="true" />{value === 'wind' ? formatWind(item.value, windUnit) : `${item.value.toFixed(value === 'water' ? 1 : 0)}°`}</b>
               </button>)}
             </section>
