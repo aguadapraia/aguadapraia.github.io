@@ -16,8 +16,7 @@ interface BeachDetailPanelProps {
 export default function BeachDetailPanel({ name, location, date, language, scrollRef, children }: BeachDetailPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   const headingRef = useRef<HTMLDivElement>(null)
-  const drag = useRef<{ id: number; y: number; height: number } | null>(null)
-  const ignoreClick = useRef(false)
+  const drag = useRef<{ id: number; y: number; height: number; toggle: boolean } | null>(null)
   const previousLevel = useRef<BeachSheetLevel>('summary')
   const [level, setLevel] = useState<BeachSheetLevel>('summary')
   const [maximum, setMaximum] = useState(600)
@@ -71,10 +70,16 @@ export default function BeachDetailPanel({ name, location, date, language, scrol
       const next = beachSheetAfterDrag(level, delta, maximum, summaryHeight)
       if (next === 'collapsed' && level !== 'collapsed') previousLevel.current = level
       setLevel(next)
-      ignoreClick.current = true
+    } else if (!cancelled && start.toggle) {
+      togglePanel()
     }
     drag.current = null
     setDragHeight(null)
+  }
+
+  function togglePanel() {
+    if (level !== 'collapsed') previousLevel.current = level
+    setLevel(level === 'collapsed' ? previousLevel.current : 'collapsed')
   }
 
   const style: CSSProperties = mobile ? { height: dragHeight ?? beachSheetHeight(level, maximum, summaryHeight) } : {}
@@ -84,9 +89,11 @@ export default function BeachDetailPanel({ name, location, date, language, scrol
       <div className="beach-panel-header" ref={headingRef}
         onPointerDown={(event) => {
           if (!mobile || !event.isPrimary || event.button !== 0) return
-          ignoreClick.current = false
-          drag.current = { id: event.pointerId, y: event.clientY, height: panelRef.current?.getBoundingClientRect().height ?? 64 }
-          if (event.target instanceof Element) event.target.setPointerCapture(event.pointerId)
+          const button = event.target instanceof Element ? event.target.closest('button') : null
+          drag.current = { id: event.pointerId, y: event.clientY, height: panelRef.current?.getBoundingClientRect().height ?? 64, toggle: Boolean(button) }
+          const captureTarget = button ?? event.currentTarget
+          // Keep captured touch on the control rather than its nested SVG.
+          captureTarget.setPointerCapture(event.pointerId)
         }}
         onPointerMove={(event) => {
           const start = drag.current
@@ -104,10 +111,8 @@ export default function BeachDetailPanel({ name, location, date, language, scrol
           title={collapsed ? (pt ? 'Expandir detalhes' : 'Expand details') : (pt ? 'Ver mapa' : 'View map')}
           aria-label={collapsed ? (pt ? `Expandir detalhes de ${name}` : `Expand details for ${name}`) : (pt ? 'Minimizar detalhes e ver mapa' : 'Minimize details and view map')}
           onClick={(event) => {
-            if (ignoreClick.current && event.detail !== 0) { ignoreClick.current = false; return }
-            ignoreClick.current = false
-            if (level !== 'collapsed') previousLevel.current = level
-            setLevel(level === 'collapsed' ? previousLevel.current : 'collapsed')
+            // Pointer taps toggle on release; click covers keyboard and assistive input.
+            if (event.detail === 0) togglePanel()
           }}
           onKeyDown={(event) => {
             if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
