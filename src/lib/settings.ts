@@ -5,7 +5,7 @@ const SettingsSchema = z.object({
   language: z.enum(['pt', 'en']),
   theme: z.enum(['light', 'dark']),
   windUnit: z.enum(['kmh', 'knots']),
-  mapMetric: z.enum(['water', 'air']),
+  mapMetric: z.enum(['water', 'air', 'wind']),
   territory: z.enum(['all', 'mainland', 'madeira', 'azores']),
 })
 

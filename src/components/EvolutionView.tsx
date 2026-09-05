@@ -1,225 +1,131 @@
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { Area, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { ArrowUp, CalendarDays, ChevronDown, Droplets, Search, ThermometerSun, X, Wind } from 'lucide-react'
 import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-} from 'react'
-import {
-  Area,
-  CartesianGrid,
-  ComposedChart,
-  Line,
-  ReferenceArea,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import { ArrowUp, Droplets, Pause, Play, Plus, ThermometerSun, Wind, X } from 'lucide-react'
-import {
-  evolutionDefaultRange,
   historyPointFromTimeline,
   loadBeachDayDetail,
   loadEvolutionBeachHistories,
   loadEvolutionDate,
   loadEvolutionSummary,
   loadTimelineIndex,
-  resolveDateIndex,
   type TimelinePoint,
 } from '../data/api'
 import { getCopy, type Language } from '../i18n'
 import { beachColor } from '../lib/beach-palette'
-import { shortBeachName, uniqueShortBeachName } from '../lib/beach-name'
-import { bridgeForecastSeries } from '../lib/chart-series'
+import { uniqueShortBeachName } from '../lib/beach-name'
+import { normalizeBeachSearch } from '../lib/beach-search'
+import { classifyDate, lisbonDate, preferredForecastDate } from '../lib/date-classification'
+import { daytimeReadings, hasHourlyAir } from '../lib/daytime-hours'
 import {
-  classifyDate,
-  preferredForecastDate,
-} from '../lib/date-classification'
-import { daytimeReadings } from '../lib/daytime-hours'
-import { canPlaySequence, nextPlayIndex, playIntervalMs } from '../lib/play-sequence'
-import { getRelativeLabel } from '../lib/relative-date'
+  chartLineReadings, chartLineStatistics, chartReadingRange, DEFAULT_CHART_VISIBILITY,
+  summarizeChartStatistic, visibleChartReadings, visibleChartStatistics, type ChartReadings, type ChartStatistic,
+} from '../lib/chart-visibility'
+import { loadBoundedEvolution } from '../lib/evolution-history'
+import {
+  availableEvolutionDates,
+  calendarDayCount,
+  evolutionPeriodBounds,
+  resolveEvolutionPeriod,
+  type EvolutionPeriod,
+} from '../lib/evolution-period'
 import { computeTerritoryAggregate } from '../lib/territory-aggregate'
 import { convertWind, type WindUnit } from '../lib/units'
 import { windDirectionDegrees } from '../lib/wind-direction'
-import type {
-  BeachDataset,
-  BeachDayDetail,
-  BeachViewModel,
-  HistoryPoint,
-  MapMetric,
-  SettingsMapMetric,
-  TerritoryAggregate,
-  TerritoryFilter,
-  Theme,
-} from '../types'
-import ChartTooltip from './ChartTooltip'
+import type { BeachDataset, BeachDayDetail, BeachViewModel, HistoryPoint, MapMetric, SettingsMapMetric, TerritoryAggregate, TerritoryFilter, Theme } from '../types'
 import LoadingIndicator from './LoadingIndicator'
+import ChartSeriesLegend from './ChartSeriesLegend'
 import MapLegend from './MapLegend'
 import TerritorySelect from './TerritorySelect'
+import './evolution.css'
 
 const PortugalMap = lazy(() => import('./PortugalMap'))
-const MetricHistoryChart = lazy(() => import('./MetricHistoryChart'))
 
-interface RangeResult {
-  start: string
-  end: string
-  dates: string[]
-  aggregates: Array<Omit<TerritoryAggregate, 'kind'>>
-}
-
-function beachForDate(
-  beach: BeachViewModel,
-  date: string,
-  metric: MapMetric,
-): BeachViewModel | null {
-  const point = beach.history.find((item) => item.date === date)
-  if (!point) return null
-  const hasData =
-    metric === 'water'
-      ? point.waterMax !== undefined
-      : metric === 'air'
-        ? point.airMax !== undefined
-        : point.windAverageKnots !== undefined
-  if (!hasData) return null
-
-  const daily = beach.daily.find((item) => item.date === date)
-  if (daily) {
-    return { ...beach, daily: [daily] }
-  }
-
-  const waterMin = point.waterMin ?? point.waterMax ?? Number.NaN
-  const airMin = point.airMin ?? point.airMax ?? Number.NaN
-  return {
-    ...beach,
-    daily: [{
-      date: point.date,
-      waterMin,
-      waterMax: point.waterMax ?? waterMin,
-      waterMinHour: null,
-      waterMaxHour: null,
-      windMinKnots: point.windMinKnots ?? Number.NaN,
-      windMaxKnots: point.windMaxKnots ?? Number.NaN,
-      windMinHour: null,
-      windMaxHour: null,
-      windAverageKnots: point.windAverageKnots ?? Number.NaN,
-      windAt13Knots: point.windAverageKnots ?? Number.NaN,
-      airMin,
-      airMax: point.airMax ?? airMin,
-      airMinHour: null,
-      airMaxHour: null,
-      airLocation: '',
-      airDistanceKm: 0,
-    }],
-  }
-}
-
-function formatDate(
-  date: string,
-  language: Language,
-  options: Intl.DateTimeFormatOptions = {},
-) {
-  return new Intl.DateTimeFormat(language === 'pt' ? 'pt-PT' : 'en-GB', {
-    day: '2-digit',
-    month: 'short',
-    ...options,
-  }).format(new Date(`${date}T12:00:00Z`))
-}
-
-function aggregateMetric(
-  aggregate: TerritoryAggregate | null,
-  metric: MapMetric,
-) {
-  if (!aggregate) return null
-  if (metric === 'water') return aggregate.water
-  if (metric === 'air') return aggregate.air
-  return aggregate.wind
-}
-
-function formatMetricValue(metric: MapMetric, value: number, windUnit: WindUnit) {
-  if (metric === 'wind') {
-    const unit = windUnit === 'kmh' ? 'km/h' : 'kn'
-    return `${convertWind(value, windUnit).toFixed(1)} ${unit}`
-  }
-  return `${value.toFixed(1)}°C`
-}
-
-function formatDirectionValue(value: string | null | undefined): string {
-  return value && value.trim() ? value : '--'
-}
-
-function formatTemperatureNumber(value: number | null | undefined): string {
-  return value === null || value === undefined ? '--' : value.toFixed(1)
-}
-
-function formatWindNumber(
-  value: number | null | undefined,
-  windUnit: WindUnit,
-): string {
-  return value === null || value === undefined
-    ? '--'
-    : convertWind(value, windUnit).toFixed(1)
-}
-
-function formatWinningDelta(
-  value: number | null | undefined,
-  other: number | null | undefined,
-  windUnit?: WindUnit,
-): string {
-  if (
-    value === null ||
-    value === undefined ||
-    other === null ||
-    other === undefined
-  ) {
-    return ''
-  }
-  const displayValue = windUnit ? convertWind(value, windUnit) : value
-  const displayOther = windUnit ? convertWind(other, windUnit) : other
-  const delta = Math.abs(displayValue - displayOther)
-  if (delta < 0.05) return ''
-  return `(+${delta.toFixed(1)})`
-}
-
-function WindReading({
-  knots,
-  direction,
-  windUnit,
-  colour,
-}: {
-  knots: number | null | undefined
-  direction: string | null | undefined
-  windUnit: WindUnit
-  colour: string
-}) {
-  const label = formatDirectionValue(direction)
-  const degrees = windDirectionDegrees(direction)
-  return (
-    <span
-      className="daily-wind-reading"
-      style={{ '--beach-series-colour': colour } as CSSProperties}
-    >
-      <span>{formatWindNumber(knots, windUnit)}</span>
-      {label !== '--' && (
-        <small title={label}>
-          (
-          {label}
-          {degrees !== null && (
-            <ArrowUp
-              size={10}
-              aria-hidden="true"
-              style={{ transform: `rotate(${degrees}deg)` }}
-            />
-          )}
-          )
-        </small>
-      )}
-    </span>
-  )
-}
+const text = {
+  pt: {
+    beaches: 'Praias', metric: 'Indicador',
+    period: 'Período', all: 'Tudo', week: 'Semana',
+    month: 'Mês', custom: 'Intervalo', day: 'Dia',
+    from: 'De', to: 'Até', apply: 'Ver período', chooseBeach: 'Procurar praias para comparar',
+    addBeach: 'Adicionar praia', noMatches: 'Nenhuma praia encontrada.',
+    maxBeaches: 'Quatro praias selecionadas. Remove uma para adicionar outra.',
+    archive: 'Arquivo', forecasts: 'Previsões', currentForecast: 'Previsão atual', mixed: 'Arquivo + previsão',
+    archiveNote: 'O arquivo guarda previsões publicadas, não observações medidas.',
+    noArchive: 'Ainda não há dias de arquivo disponíveis.',
+    indexError: 'Não foi possível confirmar a disponibilidade do arquivo.',
+    periodError: 'Escolhe datas válidas, com o início anterior ou igual ao fim.',
+    outsideArchive: 'Não existem dados publicados neste período.',
+    clipped: 'Limitado ao arquivo disponível.',
+    gap: 'dias sem publicação',
+    coverage: 'dias com dados', days: 'dias', of: 'de',
+    territoryReading: 'A linha mostra a média entre praias; a faixa mostra o mínimo e o máximo diários.',
+    hourlyKey: '08:00–18:00 · valores horários',
+    temperatureReading: 'A média territorial usa os pontos médios entre os mínimos e máximos de cada praia.',
+    beachReading: 'Uma cor por praia. Mínimos e máximos diários; para o vento, também a média diurna.',
+    hourlyReading: 'Valores horários publicados, das 08:00 às 18:00. As horas sem dados ficam em branco.',
+    airDaily: 'Ar: mín. e máx. diárias; sem valores horários.',
+    periodSummary: 'Resumo das séries visíveis', minimum: 'Mín.', maximum: 'Máx.', average: 'Média',
+    territorySummary: 'Extremos de todas as praias da região. Média dos valores diários da linha.',
+    beachSummary: 'Menor mínimo e maior máximo das previsões diárias. No vento, média das médias diurnas. Apenas séries visíveis.',
+    noData: 'Sem dados para estas séries.', hiddenSeries: 'Ativa uma série na legenda.',
+    map: 'Mapa', mapHint: 'Gráfico: escolhe o dia. Mapa: compara praias.',
+    mapDate: 'Dia no mapa', viewDay: 'Detalhe do dia', mapEmpty: 'Sem valores para este dia e indicador.',
+    hourly: 'Valores por hora', time: 'Hora', water: 'Água', air: 'Ar', wind: 'Vento',
+    windDirection: 'Direção do vento', loading: 'A carregar o período…', retry: 'Tentar novamente',
+    windDirectionNote: 'A direção indica de onde vem o vento; as setas mostram para onde sopra.',
+    loadError: 'Não foi possível carregar estes dados. Tenta novamente.',
+    partialError: 'Não foi possível carregar todas as praias. Os valores em falta não são estimados.',
+    remove: 'Remover', chart: 'Evolução no período selecionado',
+    forecastDay: 'Ver previsão de hoje', latestForecast: 'Ver previsão disponível',
+    dayKindArchive: 'Previsão arquivada', dayKindForecast: 'Previsão publicada',
+    territoryAverage: 'Média da região', compareHint: 'Até 4 praias · sem seleção, média da região',
+    pickDate: 'Escolher dia / intervalo', close: 'Fechar calendário',
+    rangeHint: 'Tudo inclui o arquivo completo. Semana e mês são períodos de calendário.',
+    fullArchive: 'Arquivo completo', forecastSection: 'Previsão atual / futura',
+    legendHelp: 'As opções aplicam-se a todas as praias. A faixa só aparece com Mín. e Máx. ativos. As falhas ficam em branco, sem interpolação.',
+  },
+  en: {
+    beaches: 'Beaches', metric: 'Metric',
+    period: 'Period', all: 'All', week: 'Week',
+    month: 'Month', custom: 'Range', day: 'Day',
+    from: 'From', to: 'To', apply: 'View period', chooseBeach: 'Find beaches to compare',
+    addBeach: 'Add a beach', noMatches: 'No beaches found.',
+    maxBeaches: 'Four beaches selected. Remove one to add another.',
+    archive: 'Archive', forecasts: 'Forecasts', currentForecast: 'Current forecast', mixed: 'Archive + forecast',
+    archiveNote: 'The archive stores published forecasts, not measured observations.',
+    noArchive: 'No archive days are available yet.',
+    indexError: 'Archive availability could not be confirmed.',
+    periodError: 'Choose valid dates, with the start on or before the end.',
+    outsideArchive: 'No published data is available in this period.',
+    clipped: 'Limited to the available archive.',
+    gap: 'days without a publication',
+    coverage: 'days with data', days: 'days', of: 'of',
+    territoryReading: 'The line shows the average across beaches; the band shows the daily minimum and maximum.',
+    hourlyKey: '08:00–18:00 · hourly values',
+    temperatureReading: 'The territory average uses the midpoint of each beach’s minimum and maximum.',
+    beachReading: 'One colour per beach. Daily minimum and maximum; wind also has a daytime average.',
+    hourlyReading: 'Published hourly values, 08:00–18:00. Hours without data are left blank.',
+    airDaily: 'Air: daily min and max only; no hourly values.',
+    periodSummary: 'Summary of visible series', minimum: 'Min.', maximum: 'Max.', average: 'Average',
+    territorySummary: 'Extremes across all beaches in the region. Average of the daily line values.',
+    beachSummary: 'Lowest daily minimum and highest daily maximum. For wind, the average of daytime averages. Visible series only.',
+    noData: 'No data for these series.', hiddenSeries: 'Enable a series in the legend.',
+    map: 'Map', mapHint: 'Chart: choose a day. Map: compare beaches.',
+    mapDate: 'Map day', viewDay: 'Day detail', mapEmpty: 'No values for this day and metric.',
+    hourly: 'Hourly values', time: 'Time', water: 'Water', air: 'Air', wind: 'Wind',
+    windDirection: 'Wind direction', loading: 'Loading this period…', retry: 'Try again',
+    windDirectionNote: 'Direction indicates where the wind comes from; arrows show where it blows.',
+    loadError: 'These data could not be loaded. Please try again.',
+    partialError: 'Some beaches could not be loaded. Missing values are not estimated.',
+    remove: 'Remove', chart: 'Evolution during the selected period',
+    forecastDay: 'See today’s forecast', latestForecast: 'See available forecast',
+    dayKindArchive: 'Archived forecast', dayKindForecast: 'Published forecast',
+    territoryAverage: 'Region average', compareHint: 'Up to 4 beaches · none selected shows the region average',
+    pickDate: 'Choose day / range', close: 'Close calendar',
+    rangeHint: 'All includes the full archive. Week and month are calendar periods.',
+    fullArchive: 'Full archive', forecastSection: 'Current / future forecast',
+    legendHelp: 'Options apply to all beaches. The band requires both Min. and Max. Missing values stay blank, without interpolation.',
+  },
+} as const
 
 interface EvolutionViewProps {
   dataset: BeachDataset
@@ -230,1898 +136,776 @@ interface EvolutionViewProps {
   onTerritoryChange: (territory: TerritoryFilter) => void
   initialMapMetric: SettingsMapMetric
   onMapMetricChange: (metric: SettingsMapMetric) => void
+  initialBeachId?: string
+}
+
+type Aggregate = Omit<TerritoryAggregate, 'kind'>
+type ChartPoint = { date: string; [key: string]: string | number | number[] | undefined }
+type ViewPeriodPreset = 'all' | 'month' | 'week' | 'day' | 'custom'
+interface Series { key: string; name: string; color: string }
+interface Summary { id: string; name: string; color: string; values: ({ date: string } & ChartReadings)[] }
+
+function formatDate(date: string, language: Language, year = false) {
+  if (!date) return ''
+  return new Intl.DateTimeFormat(language === 'pt' ? 'pt-PT' : 'en-GB', {
+    day: 'numeric', month: 'short', ...(year ? { year: 'numeric' as const } : {}),
+  }).format(new Date(`${date}T12:00:00Z`))
+}
+
+function finite(value: number | null | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function metricValue(point: HistoryPoint | undefined, metric: MapMetric): number | undefined {
+  return finite(metric === 'water' ? point?.waterMax : metric === 'air' ? point?.airMax : point?.windAverageKnots)
+}
+
+function mapBeach(beach: BeachViewModel, point: TimelinePoint): BeachViewModel {
+  return {
+    ...beach,
+    daily: [{
+      date: point.date, waterMin: point.waterMin ?? NaN, waterMax: point.waterMax ?? NaN,
+      waterMinHour: null, waterMaxHour: null, airMin: point.airMin ?? NaN, airMax: point.airMax ?? NaN,
+      airMinHour: null, airMaxHour: null, airLocation: '', airDistanceKm: 0,
+      windMinKnots: point.windMinKnots ?? NaN, windMaxKnots: point.windMaxKnots ?? NaN,
+      windAverageKnots: point.windAverageKnots ?? NaN, windAt13Knots: point.windAverageKnots ?? NaN,
+      windMinHour: null, windMaxHour: null,
+    }],
+  }
+}
+
+function retainCache<T>(cache: Map<string, T>, key: string, value: T) {
+  cache.set(key, value)
+  if (cache.size > 24) cache.delete(cache.keys().next().value!)
 }
 
 export default function EvolutionView({
-  dataset,
-  language,
-  windUnit,
-  theme,
-  territory,
-  onTerritoryChange,
-  initialMapMetric,
-  onMapMetricChange,
+  dataset, language, windUnit, theme, territory, onTerritoryChange,
+  initialMapMetric, onMapMetricChange, initialBeachId,
 }: EvolutionViewProps) {
   const copy = getCopy(language)
-  const playRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const activeRef = useRef(true)
-  const dayDetailTokenRef = useRef(0)
-  const compareDayTokenRef = useRef(0)
-  const dateRequestRef = useRef<AbortController | null>(null)
-  const historyRequestRef = useRef<AbortController | null>(null)
-  const datePrefetchesRef = useRef(new Set<string>())
-  const isPlayingRef = useRef(false)
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
-  const [isMobile, setIsMobile] = useState(
-    () =>
-      typeof window !== 'undefined' &&
-      window.matchMedia('(max-width: 760px)').matches,
+  const t = text[language]
+  const today = lisbonDate()
+  const [metric, setMetric] = useState<MapMetric>(initialMapMetric)
+  const [visibility, setVisibility] = useState(DEFAULT_CHART_VISIBILITY)
+  const [selectedIds, setSelectedIds] = useState<string[]>(() =>
+    initialBeachId && dataset.beaches.some((beach) => beach.id === initialBeachId) ? [initialBeachId] : [],
   )
-  const [viewMode, setViewMode] = useState<'one-day' | 'range'>('range')
-  const [dateIndex, setDateIndex] = useState(() =>
-    Math.max(
-      0,
-      dataset.forecastDates.indexOf(
-        preferredForecastDate(dataset.forecastDates),
-      ),
-    ),
-  )
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [mapMetric, setMapMetric] = useState<MapMetric>(initialMapMetric)
-  const [selectedId, setSelectedId] = useState('')
-  const [compareIds, setCompareIds] = useState<string[]>([])
-  const [compareQuery, setCompareQuery] = useState('')
-  const [compareSearchOpen, setCompareSearchOpen] = useState(false)
-  const [activeCompareIndex, setActiveCompareIndex] = useState(0)
-  const [pendingDay, setPendingDay] = useState('')
+  const [query, setQuery] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchIndex, setSearchIndex] = useState(0)
+  const [indexDates, setIndexDates] = useState<string[]>([])
+  const [indexLoading, setIndexLoading] = useState(true)
+  const [indexError, setIndexError] = useState(false)
+  const [indexRetry, setIndexRetry] = useState(0)
+  const [retry, setRetry] = useState(0)
+  const [preset, setPreset] = useState<ViewPeriodPreset>('all')
+  const [dateMode, setDateMode] = useState<'day' | 'week' | 'month' | 'custom'>('custom')
+  const [period, setPeriod] = useState<EvolutionPeriod | null>(null)
   const [pendingStart, setPendingStart] = useState('')
   const [pendingEnd, setPendingEnd] = useState('')
-  const [rangeResult, setRangeResult] = useState<RangeResult | null>(null)
-  const [rangeLoading, setRangeLoading] = useState(false)
-  const [rangeError, setRangeError] = useState<string | null>(null)
-  const [dayDetail, setDayDetail] = useState<BeachDayDetail | null>(null)
-  const [dayDetailLoading, setDayDetailLoading] = useState(false)
-  const [dayDetailError, setDayDetailError] = useState(false)
-  const [compareDayDetails, setCompareDayDetails] = useState<
-    ReadonlyMap<string, BeachDayDetail>
-  >(new Map())
-  const [compareDayLoading, setCompareDayLoading] = useState(false)
-  const [datePointsByKey, setDatePointsByKey] = useState<
-    ReadonlyMap<string, TimelinePoint[]>
-  >(new Map())
-  const [historyByBeachId, setHistoryByBeachId] = useState<
-    ReadonlyMap<string, HistoryPoint[]>
-  >(new Map())
-  const [dateLoading, setDateLoading] = useState(false)
-  const [rangeHistoryLoading, setRangeHistoryLoading] = useState(false)
-  const initializedRef = useRef(false)
-  const lastAppliedTerritoryRef = useRef(territory)
-  const tokenRef = useRef(0)
-  const [availableHistoryDates, setAvailableHistoryDates] = useState<string[]>([])
-  const [availableHistoryLoaded, setAvailableHistoryLoaded] = useState(false)
+  const [periodError, setPeriodError] = useState<'invalid' | 'empty' | null>(null)
+  const [mapIndex, setMapIndex] = useState(-1)
+  const [isMobile, setIsMobile] = useState(false)
+  const [summaryResult, setSummaryResult] = useState<{ key: string; values: Aggregate[] } | null>(null)
+  const [historyResult, setHistoryResult] = useState<{ key: string; values: Map<string, HistoryPoint[]> } | null>(null)
+  const [detailsResult, setDetailsResult] = useState<{ key: string; values: Map<string, BeachDayDetail>; failed: boolean } | null>(null)
+  const [loadState, setLoadState] = useState<{ key: string; status: 'loading' | 'error' | 'ready' }>({ key: '', status: 'ready' })
+  const [mapResult, setMapResult] = useState<{ key: string; points: TimelinePoint[] } | null>(null)
+  const [mapState, setMapState] = useState<{ key: string; status: 'loading' | 'error' | 'ready' }>({ key: '', status: 'ready' })
+  const summaryCache = useRef(new Map<string, Aggregate[]>())
+  const historyCache = useRef(new Map<string, Map<string, HistoryPoint[]>>())
+  const mapCache = useRef(new Map<string, TimelinePoint[]>())
+  const dateControl = useRef<HTMLDetailsElement>(null)
+  const appliedSeed = useRef<string | undefined>(undefined)
+
+  useEffect(() => { setMetric(initialMapMetric) }, [initialMapMetric])
 
   useEffect(() => {
-    isPlayingRef.current = isPlaying
-  }, [isPlaying])
+    const mobile = window.matchMedia('(max-width: 760px)')
+    const update = () => setIsMobile(mobile.matches)
+    update()
+    mobile.addEventListener('change', update)
+    return () => mobile.removeEventListener('change', update)
+  }, [])
 
   useEffect(() => {
-    activeRef.current = true
-    return () => {
-      activeRef.current = false
-      dateRequestRef.current?.abort()
-      historyRequestRef.current?.abort()
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !dateControl.current?.contains(event.target) && dateControl.current) {
+        dateControl.current.open = false
+      }
     }
+    document.addEventListener('pointerdown', closeOutside)
+    return () => document.removeEventListener('pointerdown', closeOutside)
   }, [])
 
   useEffect(() => {
     let active = true
-    setAvailableHistoryLoaded(false)
-    loadTimelineIndex()
-      .then((index) => {
-        if (!active) return
-        setAvailableHistoryDates(index.dates)
-        setAvailableHistoryLoaded(true)
-      })
-      .catch(() => {
-        if (!active) return
-        setAvailableHistoryDates(dataset.historyDates)
-        setAvailableHistoryLoaded(true)
-      })
-    return () => {
-      active = false
-    }
-  }, [dataset.historyDates])
+    setIndexLoading(true)
+    setIndexError(false)
+    loadTimelineIndex().then((index) => {
+      if (active) setIndexDates(availableEvolutionDates(index.dates))
+    }).catch(() => {
+      if (!active) return
+      setIndexError(true)
+    }).finally(() => { if (active) setIndexLoading(false) })
+    return () => { active = false }
+  }, [dataset.generatedAt, indexRetry])
 
-  const applyRange = useCallback(async (start: string, end: string) => {
-    setIsPlaying(false)
-    if (start > end) {
-      setRangeError(copy.invalidRange)
-      return
-    }
+  const archiveDates = useMemo(() => indexDates.filter((date) => date < today), [indexDates, today])
+  const forecastDates = useMemo(() => availableEvolutionDates(dataset.forecastDates.filter((date) => date >= today)), [dataset.forecastDates, today])
+  const availableDates = useMemo(() => availableEvolutionDates([...archiveDates, ...forecastDates]), [archiveDates, forecastDates])
+  const firstArchive = archiveDates[0] ?? ''
+  const lastArchive = archiveDates[archiveDates.length - 1] ?? ''
+  const forecastDate = preferredForecastDate(forecastDates)
 
-    const token = ++tokenRef.current
-    setRangeLoading(true)
-    setRangeError(null)
-    try {
-      const loaded = await loadEvolutionSummary(start, end, territory)
-      if (token !== tokenRef.current || !activeRef.current) return
+  useEffect(() => {
+    if (indexLoading || indexError || preset !== 'all') return
+    setPeriod(resolveEvolutionPeriod(firstArchive, lastArchive, archiveDates))
+    setPendingStart(firstArchive)
+    setPendingEnd(lastArchive)
+  }, [archiveDates, firstArchive, indexError, indexLoading, lastArchive, preset])
 
-      const sortedDates = [
-        ...new Set([
-          ...loaded.dates,
-          ...dataset.forecastDates.filter(
-            (date) => date >= start && date <= end,
-          ),
-        ]),
-      ].sort()
-      const today = preferredForecastDate(dataset.forecastDates)
-      const newIndex = resolveDateIndex(sortedDates, today, end)
+  useEffect(() => {
+    if (!initialBeachId) { appliedSeed.current = undefined; return }
+    const beach = dataset.beaches.find((item) => item.id === initialBeachId)
+    if (!beach || appliedSeed.current === initialBeachId) return
+    appliedSeed.current = initialBeachId
+    setSelectedIds([beach.id])
+    setPreset('all')
+    setPeriodError(null)
+    setQuery('')
+    setSearchOpen(false)
+    if (territory !== 'all' && territory !== beach.territory) onTerritoryChange(beach.territory)
+  }, [dataset.beaches, initialBeachId, onTerritoryChange, territory])
 
-      setRangeResult({
-        start,
-        end,
-        dates: sortedDates,
-        aggregates: loaded.aggregates,
-      })
-      setHistoryByBeachId(new Map())
-      setDateIndex(newIndex)
-    } catch {
-      if (token !== tokenRef.current || !activeRef.current) return
-      setRangeError(copy.dataUnavailable)
-    } finally {
-      if (token === tokenRef.current && activeRef.current) {
-        setRangeLoading(false)
+  useEffect(() => {
+    setSelectedIds((ids) => {
+      const present = ids.filter((id) => dataset.beaches.some((beach) => beach.id === id))
+      return present.length === ids.length ? ids : present
+    })
+  }, [dataset.beaches])
+
+  const territoryBeaches = useMemo(() => dataset.beaches.filter((beach) => territory === 'all' || beach.territory === territory), [dataset.beaches, territory])
+  const selectedBeaches = useMemo(() => selectedIds.flatMap((id) => {
+    const beach = dataset.beaches.find((item) => item.id === id)
+    return beach ? [beach] : []
+  }), [dataset.beaches, selectedIds])
+  const activeBeaches = selectedBeaches
+  const scope = activeBeaches.length ? 'beaches' : 'territory'
+  const idsKey = activeBeaches.map((beach) => beach.id).join(',')
+  const singleDay = period?.start === period?.end && period !== null
+  const periodKey = period ? `${dataset.generatedAt}|${period.start}|${period.end}` : ''
+  const dataKey = `${periodKey}|${scope === 'territory' ? territory : idsKey}|${singleDay ? 'day' : 'range'}`
+  const hasDates = Boolean(period?.dates.length)
+  const summaryValues = summaryResult?.key === dataKey ? summaryResult.values : []
+  const historyValues = historyResult?.key === dataKey ? historyResult.values : new Map<string, HistoryPoint[]>()
+  const dayDetails = detailsResult?.key === dataKey ? detailsResult.values : new Map<string, BeachDayDetail>()
+  const loading = indexLoading || (hasDates && (loadState.key !== dataKey || loadState.status === 'loading'))
+  const loadError = loadState.key === dataKey && loadState.status === 'error'
+  const partialError = detailsResult?.key === dataKey && detailsResult.failed
+
+  useEffect(() => {
+    if (!period || !hasDates) return
+    const controller = new AbortController()
+    let active = true
+    setLoadState({ key: dataKey, status: 'loading' })
+    const complete = () => { if (active) setLoadState({ key: dataKey, status: 'ready' }) }
+    const fail = () => { if (active) setLoadState({ key: dataKey, status: 'error' }) }
+    const archiveEnd = period.end < lastArchive ? period.end : lastArchive
+    if (scope === 'territory') {
+      if (!period.dates.some((date) => date < today)) {
+        setSummaryResult({ key: dataKey, values: [] })
+        complete()
+      } else {
+        loadBoundedEvolution({
+          start: period.start, end: archiveEnd, signal: controller.signal,
+          cache: summaryCache.current, cacheKey: `${dataset.generatedAt}|${territory}`,
+          load: async (start, end, signal) => {
+            const result = await loadEvolutionSummary(start, end, territory, signal)
+            return result.aggregates.filter((value) => value.date >= start && value.date <= end)
+          },
+        }).then((chunks) => {
+          if (!active) return
+          const values = [...new Map(chunks.flat().map((value) => [value.date, value])).values()]
+          setSummaryResult({ key: dataKey, values })
+          complete()
+        }).catch(fail)
       }
-    }
-  }, [copy.dataUnavailable, copy.invalidRange, dataset.forecastDates, territory])
-
-  useEffect(() => {
-    if (!availableHistoryLoaded || initializedRef.current) return
-    initializedRef.current = true
-    lastAppliedTerritoryRef.current = territory
-    const defaults = evolutionDefaultRange(availableHistoryDates, dataset.forecastDates)
-    setPendingDay(preferredForecastDate(dataset.forecastDates) || defaults.endDate)
-    setPendingStart(defaults.startDate)
-    setPendingEnd(defaults.endDate)
-    if (defaults.startDate && defaults.endDate) {
-      void applyRange(defaults.startDate, defaults.endDate)
-    }
-  }, [applyRange, availableHistoryDates, availableHistoryLoaded, dataset.forecastDates])
-
-  useEffect(() => {
-    if (
-      !initializedRef.current ||
-      lastAppliedTerritoryRef.current === territory
-    ) {
-      return
-    }
-    lastAppliedTerritoryRef.current = territory
-    if (pendingStart && pendingEnd && pendingStart <= pendingEnd) {
-      void applyRange(pendingStart, pendingEnd)
-    }
-  }, [applyRange, pendingEnd, pendingStart, territory])
-
-  const rangeStart = rangeResult?.start ?? ''
-  const rangeEnd = rangeResult?.end ?? ''
-  const allDates = rangeResult?.dates ?? dataset.forecastDates
-
-  const activeDate = allDates[dateIndex] ?? ''
-  const activeKind = classifyDate(activeDate, dataset.forecastDates)
-  const territoryBeaches = useMemo(
-    () =>
-      territory === 'all'
-        ? dataset.beaches
-        : dataset.beaches.filter((beach) => beach.territory === territory),
-    [dataset.beaches, territory],
-  )
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
-    const media = window.matchMedia('(max-width: 760px)')
-    const update = () => setIsMobile(media.matches)
-    update()
-    media.addEventListener('change', update)
-    return () => media.removeEventListener('change', update)
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
-    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const update = () => setPrefersReducedMotion(mediaQuery.matches)
-    update()
-    if (typeof mediaQuery.addEventListener === 'function') {
-      mediaQuery.addEventListener('change', update)
-      return () => mediaQuery.removeEventListener('change', update)
-    }
-    mediaQuery.addListener(update)
-    return () => mediaQuery.removeListener(update)
-  }, [])
-
-  useEffect(() => {
-    setDateIndex((current) => Math.min(current, Math.max(0, allDates.length - 1)))
-  }, [allDates.length])
-
-  useEffect(() => {
-    setMapMetric(initialMapMetric)
-  }, [initialMapMetric])
-
-  const activeDateCacheKey = `${territory}|${activeDate}`
-  const prefetchFollowingDates = useCallback(() => {
-    const nextDates = allDates
-      .slice(dateIndex + 1, dateIndex + 3)
-      .filter(
-        (date) =>
-          classifyDate(date, dataset.forecastDates) === 'history' &&
-          !datePointsByKey.has(`${territory}|${date}`) &&
-          !datePrefetchesRef.current.has(`${territory}|${date}`),
-      )
-
-    for (const date of nextDates) {
-      const key = `${territory}|${date}`
-      datePrefetchesRef.current.add(key)
-      void loadEvolutionDate(date, territory)
-        .then((prefetched) => {
-          if (!activeRef.current) return
-          setDatePointsByKey((current) => {
-            const next = new Map(current)
-            next.set(key, prefetched.points)
-            return next
-          })
-        })
-        .catch(() => {
-          if (activeRef.current && isPlayingRef.current) {
-            setIsPlaying(false)
-            setRangeError(copy.dataUnavailable)
+    } else if (singleDay) {
+      Promise.allSettled(idsKey.split(',').map((id) => loadBeachDayDetail(id, period.start))).then((results) => {
+        if (!active) return
+        const values = new Map<string, BeachDayDetail>()
+        const ids = idsKey.split(',')
+        results.forEach((result, index) => {
+          if (result.status === 'fulfilled' && result.value.date === period.start && result.value.beachId === ids[index]) {
+            values.set(ids[index], result.value)
           }
         })
-        .finally(() => {
-          datePrefetchesRef.current.delete(key)
-        })
-    }
-  }, [
-    allDates,
-    dateIndex,
-    dataset.forecastDates,
-    datePointsByKey,
-    territory,
-    copy.dataUnavailable,
-  ])
-
-  useEffect(() => {
-    if (isPlaying) prefetchFollowingDates()
-  }, [isPlaying, prefetchFollowingDates])
-
-  useEffect(() => {
-    if (!activeDate || activeKind !== 'history') {
-      setDateLoading(false)
-      return
-    }
-    if (datePointsByKey.has(activeDateCacheKey)) {
-      setDateLoading(false)
-      prefetchFollowingDates()
-      return
-    }
-
-    dateRequestRef.current?.abort()
-    const controller = new AbortController()
-    dateRequestRef.current = controller
-    setDateLoading(true)
-
-    loadEvolutionDate(activeDate, territory, controller.signal)
-      .then((result) => {
-        if (controller.signal.aborted || !activeRef.current) return
-        setDatePointsByKey((current) => {
-          const next = new Map(current)
-          next.set(activeDateCacheKey, result.points)
-          return next
-        })
-
-        prefetchFollowingDates()
+        setDetailsResult({ key: dataKey, values, failed: values.size !== ids.length })
+        if (values.size === 0) fail()
+        else complete()
       })
-      .catch((error: unknown) => {
-        if (
-          error instanceof DOMException &&
-          error.name === 'AbortError'
-        ) {
-          return
-        }
-        if (activeRef.current) setRangeError(copy.dataUnavailable)
-      })
-      .finally(() => {
-        if (!controller.signal.aborted && activeRef.current) {
-          setDateLoading(false)
-        }
-      })
-
-    return () => controller.abort()
-  }, [
-    activeDate,
-    activeDateCacheKey,
-    activeKind,
-    copy.dataUnavailable,
-    datePointsByKey,
-    prefetchFollowingDates,
-    territory,
-  ])
-
-  useEffect(() => {
-    if (selectedId && !territoryBeaches.some((beach) => beach.id === selectedId)) {
-      setSelectedId('')
-      setCompareIds([])
-      return
-    }
-
-    setCompareIds((current) =>
-      current.filter((id) => territoryBeaches.some((beach) => beach.id === id)),
-    )
-  }, [selectedId, territoryBeaches])
-
-  const historicalBeaches = useMemo((): BeachViewModel[] => {
-    if (!activeDate) return []
-    const historicalPoints = new Map(
-      (datePointsByKey.get(activeDateCacheKey) ?? []).map((point) => [
-        point.beachId,
-        point,
-      ]),
-    )
-    return territoryBeaches.flatMap((beach) => {
-      const historicalPoint = historicalPoints.get(beach.id)
-      const candidate =
-        activeKind === 'history'
-          ? historicalPoint
-            ? beachForDate(
-                {
-                  ...beach,
-                  history: [
-                    historyPointFromTimeline(
-                      historicalPoint,
-                      dataset.forecastDates,
-                    ),
-                  ],
-                },
-                activeDate,
-                mapMetric,
-              )
-            : null
-          : beachForDate(beach, activeDate, mapMetric)
-      return candidate ? [candidate] : []
-    })
-  }, [
-    activeDate,
-    activeDateCacheKey,
-    activeKind,
-    dataset.forecastDates,
-    datePointsByKey,
-    mapMetric,
-    territoryBeaches,
-  ])
-
-  const territoryAggregates = useMemo(() => {
-    const serverAggregates = new Map(
-      (rangeResult?.aggregates ?? []).map((aggregate) => [
-        aggregate.date,
-        aggregate,
-      ]),
-    )
-    return allDates.map((date) => {
-      const kind = classifyDate(date, dataset.forecastDates)
-      const serverAggregate = serverAggregates.get(date)
-      return serverAggregate
-        ? { ...serverAggregate, kind }
-        : computeTerritoryAggregate(territoryBeaches, date, kind)
-    })
-  }, [
-    allDates,
-    dataset.forecastDates,
-    rangeResult?.aggregates,
-    territoryBeaches,
-  ])
-
-  const aggregateByDate = useMemo(
-    () => new Map(territoryAggregates.map((aggregate) => [aggregate.date, aggregate])),
-    [territoryAggregates],
-  )
-
-  const activeAggregate = aggregateByDate.get(activeDate) ?? null
-  const activeMetricAggregate = aggregateMetric(activeAggregate, mapMetric)
-  const selectedBeach = territoryBeaches.find((beach) => beach.id === selectedId) ?? null
-  const shortNameById = useMemo(
-    () =>
-      new Map(
-        territoryBeaches.map((beach) => [
-          beach.id,
-          uniqueShortBeachName(beach, territoryBeaches),
-        ]),
-      ),
-    [territoryBeaches],
-  )
-  const compareBeaches = useMemo(
-    () =>
-      compareIds.flatMap((id) => {
-        const beach = territoryBeaches.find((item) => item.id === id)
-        return beach ? [beach] : []
-      }),
-    [compareIds, territoryBeaches],
-  )
-  const selectedHistory = selectedBeach
-    ? historyByBeachId.get(selectedBeach.id) ?? []
-    : []
-
-  useEffect(() => {
-    if (
-      viewMode === 'one-day' ||
-      !rangeStart ||
-      !rangeEnd ||
-      !selectedBeach
-    ) {
-      setRangeHistoryLoading(false)
-      return
-    }
-    const requestedIds = [
-      selectedBeach.id,
-      ...compareBeaches.slice(0, 3).map((beach) => beach.id),
-    ]
-    const missingIds = requestedIds.filter(
-      (id) => !historyByBeachId.has(id),
-    )
-    if (missingIds.length === 0) {
-      setRangeHistoryLoading(false)
-      return
-    }
-
-    historyRequestRef.current?.abort()
-    const controller = new AbortController()
-    historyRequestRef.current = controller
-    setRangeHistoryLoading(true)
-
-    loadEvolutionBeachHistories(
-      missingIds,
-      rangeStart,
-      rangeEnd,
-      controller.signal,
-    )
-      .then((result) => {
-        if (controller.signal.aborted || !activeRef.current) return
-        setHistoryByBeachId((current) => {
-          const next = new Map(current)
-          for (const history of result.histories) {
-            next.set(
+    } else {
+      if (!period.dates.some((date) => date < today)) {
+        setHistoryResult({ key: dataKey, values: new Map() })
+        complete()
+      } else {
+        loadBoundedEvolution({
+          start: period.start, end: archiveEnd, signal: controller.signal,
+          cache: historyCache.current, cacheKey: `${dataset.generatedAt}|${idsKey}`,
+          load: async (start, end, signal) => {
+            const result = await loadEvolutionBeachHistories(idsKey.split(','), start, end, signal)
+            return new Map(result.histories.map((history) => [
               history.beachId,
-              history.points.map((point) =>
-                historyPointFromTimeline(point, dataset.forecastDates),
-              ),
-            )
-          }
-          return next
-        })
-      })
-      .catch((error: unknown) => {
-        if (
-          error instanceof DOMException &&
-          error.name === 'AbortError'
-        ) {
-          return
-        }
-        if (activeRef.current) setRangeError(copy.dataUnavailable)
-      })
-      .finally(() => {
-        if (!controller.signal.aborted && activeRef.current) {
-          setRangeHistoryLoading(false)
-        }
-      })
-
-    return () => controller.abort()
-  }, [
-    compareBeaches,
-    copy.dataUnavailable,
-    dataset.forecastDates,
-    historyByBeachId,
-    rangeEnd,
-    rangeStart,
-    selectedBeach,
-    viewMode,
-  ])
-
-  const compareHistories = useMemo(
-    () =>
-      compareBeaches.map((beach) => ({
-        beach,
-        history: historyByBeachId.get(beach.id) ?? [],
-        displayName: shortNameById.get(beach.id),
-      })),
-    [compareBeaches, historyByBeachId, shortNameById],
-  )
-  const singleDayMode = allDates.length === 1 || viewMode === 'one-day'
-  const comparisonLimit = singleDayMode ? 1 : 3
-  const canPlay = canPlaySequence(allDates.length)
-  useEffect(() => {
-    if (!selectedBeach || !singleDayMode || !activeDate) {
-      setDayDetail(null)
-      setDayDetailLoading(false)
-      setDayDetailError(false)
-      return
-    }
-
-    const token = ++dayDetailTokenRef.current
-    setDayDetail(null)
-    setDayDetailLoading(true)
-    setDayDetailError(false)
-
-    loadBeachDayDetail(selectedBeach.id, activeDate)
-      .then((detail) => {
-        if (token !== dayDetailTokenRef.current || !activeRef.current) return
-        setDayDetail(detail)
-      })
-      .catch(() => {
-        if (token !== dayDetailTokenRef.current || !activeRef.current) return
-        setDayDetail(null)
-        setDayDetailError(true)
-      })
-      .finally(() => {
-        if (token === dayDetailTokenRef.current && activeRef.current) {
-          setDayDetailLoading(false)
-        }
-      })
-  }, [activeDate, selectedBeach, singleDayMode])
-
-  useEffect(() => {
-    if (singleDayMode && compareIds.length > 1) {
-      setCompareIds((current) => current.slice(0, 1))
-    }
-  }, [compareIds.length, singleDayMode])
-
-  const singleCompareId = singleDayMode ? compareIds[0] ?? '' : ''
-
-  useEffect(() => {
-    if (!singleCompareId || !activeDate) {
-      setCompareDayDetails(new Map())
-      setCompareDayLoading(false)
-      return
-    }
-
-    const token = ++compareDayTokenRef.current
-    setCompareDayDetails(new Map())
-    setCompareDayLoading(true)
-
-    loadBeachDayDetail(singleCompareId, activeDate)
-      .then((detail) => {
-        if (token !== compareDayTokenRef.current || !activeRef.current) return
-        setCompareDayDetails(new Map([[singleCompareId, detail]]))
-      })
-      .catch(() => {
-        if (token !== compareDayTokenRef.current || !activeRef.current) return
-        setCompareDayDetails(new Map())
-      })
-      .finally(() => {
-        if (token === compareDayTokenRef.current && activeRef.current) {
-          setCompareDayLoading(false)
-        }
-      })
-  }, [activeDate, singleCompareId])
-
-  const chartData = useMemo(() => {
-    const bridged = bridgeForecastSeries(
-        territoryAggregates.map((aggregate) => {
-          const metricData = aggregateMetric(aggregate, mapMetric)
-          return {
-            date: aggregate.date,
-            label: formatDate(aggregate.date, language),
-            kind: aggregate.kind,
-            historyMin:
-              metricData && aggregate.kind === 'history'
-                ? mapMetric === 'wind'
-                  ? convertWind(metricData.min, windUnit)
-                  : metricData.min
-                : undefined,
-            historyAvg:
-              metricData && aggregate.kind === 'history'
-                ? mapMetric === 'wind'
-                  ? convertWind(metricData.avg, windUnit)
-                  : metricData.avg
-                : undefined,
-            historyMax:
-              metricData && aggregate.kind === 'history'
-                ? mapMetric === 'wind'
-                  ? convertWind(metricData.max, windUnit)
-                  : metricData.max
-                : undefined,
-            forecastMin:
-              metricData && aggregate.kind !== 'history'
-                ? mapMetric === 'wind'
-                  ? convertWind(metricData.min, windUnit)
-                  : metricData.min
-                : undefined,
-            forecastAvg:
-              metricData && aggregate.kind !== 'history'
-                ? mapMetric === 'wind'
-                  ? convertWind(metricData.avg, windUnit)
-                  : metricData.avg
-                : undefined,
-            forecastMax:
-              metricData && aggregate.kind !== 'history'
-                ? mapMetric === 'wind'
-                  ? convertWind(metricData.max, windUnit)
-                  : metricData.max
-                : undefined,
-            coverage: metricData?.coverage,
-          }
-        }),
-        [
-          { historyKey: 'historyMin', forecastKey: 'forecastMin' },
-          { historyKey: 'historyAvg', forecastKey: 'forecastAvg' },
-          { historyKey: 'historyMax', forecastKey: 'forecastMax' },
-        ],
-      )
-    return bridged.map((point) => ({
-      ...point,
-      historyRange:
-        typeof point.historyMin === 'number' &&
-        typeof point.historyMax === 'number'
-          ? [point.historyMin, point.historyMax]
-          : undefined,
-      forecastRange:
-        typeof point.forecastMin === 'number' &&
-        typeof point.forecastMax === 'number'
-          ? [point.forecastMin, point.forecastMax]
-          : undefined,
-    }))
-  }, [language, mapMetric, territoryAggregates, windUnit])
-
-  const chartValues = chartData.flatMap((point) =>
-    [
-      point.historyMin,
-      point.historyAvg,
-      point.historyMax,
-      point.forecastMin,
-      point.forecastAvg,
-      point.forecastMax,
-    ].filter((value): value is number => value !== undefined),
-  )
-  const chartDomain: [number, number] = chartValues.length
-    ? [
-        Math.floor(Math.min(...chartValues) - (mapMetric === 'wind' ? 2 : 1)),
-        Math.ceil(Math.max(...chartValues) + (mapMetric === 'wind' ? 2 : 1)),
-      ]
-    : [0, 1]
-  const forecastLabels = chartData
-    .filter((point) => point.kind !== 'history')
-    .map((point) => point.label)
-
-  const compareOptions = useMemo(
-    () =>
-      territoryBeaches
-        .filter(
-          (beach) =>
-            beach.id !== selectedId &&
-            !compareIds.includes(beach.id),
-        )
-        .sort((first, second) => first.name.localeCompare(second.name, language)),
-    [compareIds, language, selectedId, territoryBeaches],
-  )
-  const compareMatches = useMemo(() => {
-    const normalized = compareQuery.trim().toLocaleLowerCase(language)
-    if (!normalized) return compareOptions.slice(0, 8)
-    return compareOptions
-      .filter((beach) =>
-        `${beach.name} ${beach.municipality} ${beach.district}`
-          .toLocaleLowerCase(language)
-          .includes(normalized),
-      )
-      .slice(0, 8)
-  }, [compareOptions, compareQuery, language])
-
-  const comparisonRows = useMemo(
-    () =>
-      selectedBeach
-        ? [selectedBeach, ...compareBeaches.slice(0, comparisonLimit)].map((beach) => {
-            const cachedPoint = (
-              datePointsByKey.get(activeDateCacheKey) ?? []
-            ).find((entry) => entry.beachId === beach.id)
-            const point =
-              (historyByBeachId.get(beach.id) ?? []).find(
-                (entry) => entry.date === activeDate,
-              ) ??
-              (cachedPoint
-                ? historyPointFromTimeline(
-                    cachedPoint,
-                    dataset.forecastDates,
-                  )
-                : beach.history.find(
-                    (entry) => entry.date === activeDate,
-                  )) ??
-              null
-            const isSelected = beach.id === selectedId
-            const detail = isSelected ? dayDetail : compareDayDetails.get(beach.id)
-            return {
-              beach,
-              shortName:
-                shortNameById.get(beach.id) ?? shortBeachName(beach.name),
-              waterMax: detail?.summary?.waterMaxCelsius ?? point?.waterMax,
-              airMax: detail?.air?.maximumCelsius ?? point?.airMax,
-              windAverageKnots:
-                detail?.summary?.daytimeWindAverageKnots ??
-                point?.windAverageKnots,
-            }
-          })
-        : [],
-    [
-      activeDate,
-      compareBeaches,
-      compareDayDetails,
-      comparisonLimit,
-      activeDateCacheKey,
-      dataset.forecastDates,
-      datePointsByKey,
-      dayDetail,
-      historyByBeachId,
-      selectedBeach,
-      selectedId,
-      shortNameById,
-    ],
-  )
-  const hourlyBeachDetails = useMemo(
-    () =>
-      selectedBeach
-        ? [selectedBeach, ...compareBeaches.slice(0, comparisonLimit)].map(
-            (beach) => ({
-              beach,
-              detail:
-               beach.id === selectedId
-                 ? dayDetail
-                 : compareDayDetails.get(beach.id) ?? null,
-              shortName:
-                shortNameById.get(beach.id) ?? shortBeachName(beach.name),
-            }),
-          )
-        : [],
-    [
-      compareBeaches,
-      compareDayDetails,
-      comparisonLimit,
-      dayDetail,
-      selectedBeach,
-      selectedId,
-      shortNameById,
-    ],
-  )
-  const hourlyComparisonRows = useMemo(
-    () =>
-      Array.from({ length: 11 }, (_, index) => {
-        const hour = index + 8
-        return {
-          hour,
-          readings: hourlyBeachDetails.map(({ detail }) =>
-            daytimeReadings(detail?.hourly ?? []).find(
-              (reading) => reading.hour === hour,
-            ),
-          ),
-        }
-      }),
-    [hourlyBeachDetails],
-  )
-
-  useEffect(() => {
-    if (!isPlaying) {
-      if (playRef.current) clearTimeout(playRef.current)
-      return
-    }
-
-    playRef.current = setTimeout(() => {
-      setDateIndex((current) => {
-        const next = nextPlayIndex(current, allDates.length, prefersReducedMotion)
-        if (next === null) {
-          setIsPlaying(false)
-          return current
-        }
-        const nextDate = allDates[next]
-        const nextKey = `${territory}|${nextDate}`
-        if (
-          classifyDate(nextDate, dataset.forecastDates) === 'history' &&
-          !datePointsByKey.has(nextKey)
-        ) {
-          if (!datePrefetchesRef.current.has(nextKey)) {
-            setIsPlaying(false)
-            setRangeError(copy.dataUnavailable)
-          }
-          return current
-        }
-        if (next >= allDates.length - 1) {
-          setIsPlaying(false)
-        }
-        return next
-      })
-    }, playIntervalMs(prefersReducedMotion))
-
-    return () => {
-      if (playRef.current) clearTimeout(playRef.current)
-    }
-  }, [
-    allDates,
-    copy.dataUnavailable,
-    dataset.forecastDates,
-    dateIndex,
-    datePointsByKey,
-    isPlaying,
-    prefersReducedMotion,
-    territory,
-  ])
-
-  function handleSelect(id: string) {
-    if (selectedId && id !== selectedId) {
-      if (compareIds.includes(id)) {
-        setCompareIds((current) => current.filter((value) => value !== id))
-      } else if (compareIds.length < comparisonLimit) {
-        setCompareIds((current) => [...current, id])
+              history.points.filter((point) => point.date >= start && point.date <= end && point.beachId === history.beachId)
+                .map((point) => historyPointFromTimeline(point, dataset.forecastDates)),
+            ]))
+          },
+        }).then((chunks) => {
+          if (!active) return
+          const values = new Map(idsKey.split(',').map((id) => [
+            id,
+            [...new Map(chunks.flatMap((chunk) => chunk.get(id) ?? []).map((point) => [point.date, point])).values()],
+          ]))
+          setHistoryResult({ key: dataKey, values })
+          complete()
+        }).catch(fail)
       }
+    }
+    return () => { active = false; controller.abort() }
+  }, [dataKey, dataset.forecastDates, dataset.generatedAt, hasDates, idsKey, lastArchive, period, retry, scope, singleDay, territory, today])
+
+  const mapDates = period?.calendarDates ?? []
+  const activeMapIndex = mapIndex >= 0 && mapIndex < mapDates.length ? mapIndex : Math.max(0, mapDates.length - 1)
+  const mapDate = mapDates[activeMapIndex] ?? ''
+  const mapPublished = Boolean(period?.dates.includes(mapDate))
+  const mapKey = `${dataset.generatedAt}|${territory}|${mapDate}`
+  const mapLoading = mapPublished && mapDate < today && (mapState.key !== mapKey || mapState.status === 'loading')
+  const mapError = mapPublished && mapState.key === mapKey && mapState.status === 'error'
+
+  useEffect(() => { setMapIndex(-1) }, [periodKey])
+
+  useEffect(() => {
+    if (!mapDate || !mapPublished || mapDate >= today) return
+    const controller = new AbortController()
+    const cached = mapCache.current.get(mapKey)
+    if (cached) {
+      setMapResult({ key: mapKey, points: cached })
+      setMapState({ key: mapKey, status: 'ready' })
       return
     }
+    setMapState({ key: mapKey, status: 'loading' })
+    loadEvolutionDate(mapDate, territory, controller.signal).then((result) => {
+      if (controller.signal.aborted) return
+      if (result.date !== mapDate) throw new Error('Unexpected evolution date')
+      const points = result.points.filter((point) => point.date === mapDate)
+      retainCache(mapCache.current, mapKey, points)
+      setMapResult({ key: mapKey, points })
+      setMapState({ key: mapKey, status: 'ready' })
+    }).catch(() => {
+      if (!controller.signal.aborted) {
+        setMapState({ key: mapKey, status: 'error' })
+      }
+    })
+    return () => controller.abort()
+  }, [mapDate, mapKey, mapPublished, retry, territory, today])
 
-    if (selectedId === id) {
-      setSelectedId('')
-      setCompareIds([])
-      return
-    }
-
-    setSelectedId(id)
-  }
-
-  function addComparison(id: string) {
-    if (
-      !id ||
-      compareIds.includes(id) ||
-      id === selectedId ||
-      compareIds.length >= comparisonLimit
-    ) {
-      return
-    }
-    setCompareIds((current) => [...current, id])
-  }
-
-  function removeComparison(id: string) {
-    setCompareIds((current) => current.filter((value) => value !== id))
-  }
-
-  function addComparisonFromSearch() {
-    const normalized = compareQuery.trim().toLocaleLowerCase(language)
-    const match =
-      compareOptions.find((beach) =>
-        [
-          beach.name,
-          shortNameById.get(beach.id) ?? shortBeachName(beach.name),
-        ].some(
-          (name) => name.toLocaleLowerCase(language) === normalized,
-        ),
-      ) ?? compareMatches[0]
-    if (!match) return
-    addComparison(match.id)
-    setCompareQuery('')
-    setCompareSearchOpen(false)
-    setActiveCompareIndex(0)
-  }
-
-  function selectCompareBeach(id: string) {
-    addComparison(id)
-    setCompareQuery('')
-    setCompareSearchOpen(false)
-    setActiveCompareIndex(0)
-  }
-
-  if (allDates.length === 0) {
-    return (
-      <main className="evolution-empty">
-        <p>{copy.noHistoryAvailable}</p>
-      </main>
+  const mapBeaches = useMemo(() => {
+    if (!mapPublished) return []
+    if (mapDate >= today) return territoryBeaches.filter((beach) =>
+      metricValue(beach.history.find((point) => point.date === mapDate), metric) !== undefined,
     )
+    if (mapResult?.key !== mapKey) return []
+    const points = new Map(mapResult.points.map((point) => [point.beachId, point]))
+    return territoryBeaches.flatMap((beach) => {
+      const point = points.get(beach.id)
+      if (!point || metricValue({ ...point, label: '', kind: 'history' }, metric) === undefined) return []
+      return [mapBeach(beach, point)]
+    })
+  }, [mapDate, mapKey, mapPublished, mapResult, metric, territoryBeaches, today])
+
+  const searchMatches = useMemo(() => {
+    const normalized = normalizeBeachSearch(query)
+    return dataset.beaches.filter((beach) => !selectedIds.includes(beach.id) &&
+      normalizeBeachSearch(`${beach.name} ${beach.municipality} ${beach.district}`).includes(normalized),
+    ).slice(0, 7)
+  }, [dataset.beaches, query, selectedIds])
+
+  function applyPeriod(start: string, end: string, nextPreset: ViewPeriodPreset = preset) {
+    const size = calendarDayCount(start, end)
+    if (!size) { setPeriodError('invalid'); return }
+    const historicalPreset = nextPreset === 'all' || nextPreset === 'week' || nextPreset === 'month'
+    const next = resolveEvolutionPeriod(start, end, historicalPreset ? archiveDates : availableDates)
+    setPendingStart(start)
+    setPendingEnd(end)
+    setPreset(nextPreset)
+    setPeriod(next)
+    setPeriodError(!next?.dates.length ? 'empty' : null)
+    if (dateControl.current) dateControl.current.open = false
   }
 
-  const invalidPendingRange = pendingStart > pendingEnd && pendingStart !== '' && pendingEnd !== ''
-  const timelineError = invalidPendingRange ? copy.invalidRange : rangeError
-  const windUnitLabel = windUnit === 'kmh' ? 'km/h' : 'kn'
-  const metricColor = mapMetric === 'water'
-    ? 'var(--metric-water)'
-    : mapMetric === 'air'
-      ? 'var(--metric-air)'
-      : 'var(--metric-wind)'
-  const metricMinColor = `color-mix(in srgb, ${metricColor} 45%, var(--cp-surface))`
-  const metricAvgColor = metricColor
-  const metricMaxColor = `color-mix(in srgb, ${metricColor} 72%, var(--cp-text))`
-  const territoryRange = activeMetricAggregate
-    ? activeMetricAggregate.max - activeMetricAggregate.min
-    : 0
-  const territoryAvgPosition =
-    activeMetricAggregate && territoryRange > 0
-      ? ((activeMetricAggregate.avg - activeMetricAggregate.min) /
-          territoryRange) *
-        100
-      : 50
-  const territoryDistStyle = {
-    '--metric-color': metricColor,
-    '--metric-min-color': metricMinColor,
-    '--metric-avg-color': metricAvgColor,
-    '--metric-max-color': metricMaxColor,
-    '--avg-position': `${Math.max(0, Math.min(100, territoryAvgPosition))}%`,
-  } as CSSProperties
-  const metricEvolutionTitle =
-    mapMetric === 'water'
-      ? copy.waterEvolution
-      : mapMetric === 'air'
-        ? copy.airEvolution
-        : copy.windEvolution
-  const metricUnit = mapMetric === 'wind' ? windUnitLabel : '°C'
-  const comparisonGridStyle = {
-    gridTemplateColumns: `minmax(90px, 1.2fr) repeat(${Math.max(1, comparisonRows.length)}, minmax(70px, 1fr))`,
-  } as CSSProperties
-  const hourlyGroupGridStyle = {
-    gridTemplateColumns: `48px repeat(${Math.max(1, hourlyBeachDetails.length)}, minmax(0, 2fr))`,
-  } as CSSProperties
-  const hourlyMetricGridStyle = {
-    gridTemplateColumns: `48px ${Array.from(
-      { length: Math.max(1, hourlyBeachDetails.length) },
-      () => 'minmax(44px, 0.85fr) minmax(72px, 1.15fr)',
-    ).join(' ')}`,
-  } as CSSProperties
-  const comparisonMetrics = [
-    {
-      key: 'water' as const,
-      label: copy.waterMax,
-      values: comparisonRows.map((row) => row.waterMax),
-      format: formatTemperatureNumber,
-    },
-    {
-      key: 'air' as const,
-      label: copy.airMax,
-      values: comparisonRows.map((row) => row.airMax),
-      format: formatTemperatureNumber,
-    },
-    {
-      key: 'wind' as const,
-      label: copy.windAvgShort,
-      values: comparisonRows.map((row) => row.windAverageKnots),
-      format: (value: number | null | undefined) =>
-        formatWindNumber(value, windUnit),
-    },
-  ]
-  const comparisonMetricsWithWinner = comparisonMetrics.map((metric) => {
-    if (metric.values.length < 2) return { ...metric, winnerIndex: -1 }
-    const first = metric.values[0]
-    const second = metric.values[1]
-    if (
-      first === null ||
-      first === undefined ||
-      second === null ||
-      second === undefined ||
-      Math.abs(first - second) < 0.05
-    ) {
-      return { ...metric, winnerIndex: -1 }
+  function choosePreset(nextPreset: Exclude<ViewPeriodPreset, 'custom'>, anchor = lastArchive || forecastDate) {
+    setPeriodError(null)
+    if (nextPreset === 'all') {
+      applyPeriod(firstArchive, lastArchive, 'all')
+      return
     }
-    return {
-      ...metric,
-      winnerIndex:
-        metric.key === 'wind'
-          ? first < second
-            ? 0
-            : 1
-          : first > second
-            ? 0
-            : 1,
+    const bounds = evolutionPeriodBounds(nextPreset, anchor)
+    if (bounds) applyPeriod(bounds.start, bounds.end, nextPreset)
+  }
+
+  function addBeach(id: string) {
+    if (selectedIds.includes(id) || selectedIds.length >= 4) return
+    const beach = dataset.beaches.find((item) => item.id === id)
+    if (!beach) return
+    setSelectedIds((ids) => ids.includes(id) || ids.length >= 4 ? ids : [...ids, id])
+    if (territory !== 'all' && territory !== beach.territory) onTerritoryChange('all')
+    setQuery('')
+    setSearchOpen(false)
+    setSearchIndex(0)
+  }
+
+  function selectMapBeach(id: string) {
+    if (selectedIds.includes(id)) {
+      setSelectedIds((ids) => ids.filter((value) => value !== id))
+    }
+    else addBeach(id)
+  }
+
+  const metricColor = `var(--cp-${metric}-line, var(--metric-${metric}))`
+  const unit = metric === 'wind' ? windUnit === 'kmh' ? 'km/h' : 'kn' : '°C'
+  const displayValue = (value: number) => metric === 'wind' ? convertWind(value, windUnit) : value
+  const formatValue = (value: number | undefined) => value === undefined ? '—' : `${displayValue(value).toFixed(1)} ${unit}`
+  const territoryName = territory === 'all' ? copy.portugalAndIslands : territory === 'mainland' ? copy.mainland : territory === 'azores' ? copy.azores : copy.madeira
+  const series: Series[] = scope === 'territory'
+    ? [{ key: 'territory', name: territoryName, color: metricColor }]
+    : activeBeaches.map((beach, index) => ({ key: `beach${index}`, name: uniqueShortBeachName(beach, dataset.beaches), color: beachColor(index) }))
+  const hourlyMode = singleDay && scope === 'beaches'
+  const hourlyAirAvailable = activeBeaches.some((beach) => hasHourlyAir(dayDetails.get(beach.id)?.hourly ?? []))
+  const dailyAirFallback = hourlyMode && metric === 'air' && !hourlyAirAvailable
+  const hourlyUtc = activeBeaches.length > 0 && activeBeaches.every((beach) => dayDetails.get(beach.id)?.hourlyTimeZone === 'UTC')
+  const missingHourlyAir = hourlyMode && metric === 'air' && hourlyAirAvailable
+    ? activeBeaches.filter((beach) => !hasHourlyAir(dayDetails.get(beach.id)?.hourly ?? []))
+    : []
+  const statistics: ChartStatistic[] = hourlyMode && !dailyAirFallback
+    ? ['value']
+    : scope === 'territory' || metric === 'wind' ? ['max', 'min', 'avg'] : ['max', 'min']
+  const enabledStatistics = visibleChartStatistics(visibility, statistics)
+  const lineStatistics = chartLineStatistics(visibility, statistics)
+  const statisticLabels = { max: t.maximum, min: t.minimum, avg: t.average, value: t.hourly }
+  const kinds = (['history', 'forecast'] as const).filter((kind) => kind === 'history' || visibility.forecast)
+  const aggregateLookup = new Map(summaryValues.map((value) => [value.date, value]))
+  const publishedSet = new Set(period?.dates)
+  const histories = activeBeaches.map((beach) => {
+    const points = new Map((historyValues.get(beach.id) ?? []).map((point) => [point.date, point]))
+    for (const point of beach.history) {
+      if (point.date >= today && forecastDates.includes(point.date)) points.set(point.date, point)
+    }
+    return points
+  })
+  const summaries: Summary[] = scope === 'territory'
+    ? [{ id: 'territory', name: territoryName, color: metricColor, values: [] }]
+    : activeBeaches.map((beach, index) => ({ id: beach.id, name: series[index].name, color: series[index].color, values: [] }))
+
+  function writeReadings(row: ChartPoint, key: string, readings: ChartReadings, kind: 'history' | 'forecast') {
+    const shown = visibleChartReadings(readings, visibility, statistics, kind)
+    for (const statistic of enabledStatistics) {
+      const value = shown[statistic]
+      if (value !== undefined) row[`${kind}_${key}_${statistic}`] = displayValue(value)
+    }
+    const range = chartReadingRange(shown)
+    if (range) row[`${kind}_${key}_range`] = range.map(displayValue)
+    return shown
+  }
+
+  function prepareLines(data: ChartPoint[]) {
+    data.forEach((row, index) => {
+      for (const item of series) {
+        for (const kind of kinds) {
+          const key = `${kind}_${item.key}`
+          const readings: ChartReadings = {}
+          for (const statistic of enabledStatistics) {
+            const value = row[`${key}_${statistic}`]
+            if (typeof value === 'number') readings[statistic] = value
+          }
+          const adjacentRange = Array.isArray(data[index - 1]?.[`${key}_range`]) || Array.isArray(data[index + 1]?.[`${key}_range`])
+          const lines = chartLineReadings(readings, lineStatistics, adjacentRange)
+          for (const statistic of enabledStatistics) row[`${key}_${statistic}_line`] = lines[statistic]
+        }
+      }
+    })
+  }
+
+  const chartData: ChartPoint[] = (period?.calendarDates ?? []).map((date) => {
+    const row: ChartPoint = { date }
+    if (!publishedSet.has(date)) return row
+    const kind = date < today ? 'history' : 'forecast'
+    if (scope === 'territory') {
+      const aggregate = date < today ? aggregateLookup.get(date) : computeTerritoryAggregate(territoryBeaches, date, classifyDate(date, dataset.forecastDates))
+      const value = aggregate?.[metric]
+      if (value) {
+        const shown = writeReadings(row, 'territory', value, kind)
+        if (Object.keys(shown).length) summaries[0].values.push({ date, ...shown })
+      }
+    } else {
+      histories.forEach((points, index) => {
+        const point = points.get(date)
+        const air = hourlyMode ? dayDetails.get(activeBeaches[index].id)?.air : undefined
+        const values = dailyAirFallback
+          ? { min: finite(air?.minimumCelsius), max: finite(air?.maximumCelsius) }
+          : {
+            min: finite(metric === 'water' ? point?.waterMin : metric === 'air' ? point?.airMin : point?.windMinKnots),
+            max: finite(metric === 'water' ? point?.waterMax : metric === 'air' ? point?.airMax : point?.windMaxKnots),
+            avg: metric === 'wind' ? finite(point?.windAverageKnots) : undefined,
+          }
+        const shown = writeReadings(row, `beach${index}`, values, kind)
+        if (Object.keys(shown).length) summaries[index].values.push({ date, ...shown })
+      })
+    }
+    return row
+  })
+  prepareLines(chartData)
+
+  // Only bridge adjacent published days; never draw a line across a missing day.
+  chartData.forEach((row, index) => {
+    if (index === 0 || row.date < today) return
+    const previous = chartData[index - 1]
+    if (previous.date >= today) return
+    for (const item of series) {
+      for (const statistic of enabledStatistics) {
+        const key = `${item.key}_${statistic}_line`
+        if (typeof row[`forecast_${key}`] === 'number' && typeof previous[`history_${key}`] === 'number') {
+          previous[`forecast_${key}`] = previous[`history_${key}`]
+        }
+      }
     }
   })
-  const playTitle = canPlay
-    ? isPlaying
-      ? copy.pause
-      : copy.play
-    : copy.playbackRequiresMultipleDays
-  const relativeLabel = activeDate
-    ? getRelativeLabel(activeDate, dataset.forecastDates, language)
-    : null
-  const comparisonControls = (
-    <div className="evolution-compare-controls">
-      <div className="compare-heading">
-        <strong>{copy.compareTitle}</strong>
-        <span>{compareIds.length} / {comparisonLimit}</span>
-      </div>
-      <div
-        className="evolution-compare-form"
-        onBlur={(event) => {
-          if (
-            !event.relatedTarget ||
-            !event.currentTarget.contains(event.relatedTarget)
-          ) {
-            setCompareSearchOpen(false)
-          }
-        }}
-      >
-        <div className="compare-chip-list">
-          {compareBeaches.map((beach, index) => (
-            <span key={beach.id} className="compare-chip">
-              <span
-                className="beach-swatch"
-                style={{ background: beachColor(index + 1) }}
-                aria-hidden="true"
-              />
-              <span title={beach.name}>
-                {shortNameById.get(beach.id) ?? shortBeachName(beach.name)}
-              </span>
-              <button
-                type="button"
-                aria-label={`${copy.removeComparison}: ${beach.name}`}
-                onClick={() => removeComparison(beach.id)}
-              >
-                <X size={12} />
-              </button>
-            </span>
-          ))}
-        </div>
-        <input
-          type="search"
-          value={compareQuery}
-          placeholder={copy.searchBeach}
-          aria-label={copy.searchBeach}
-          role="combobox"
-          aria-expanded={compareSearchOpen}
-          aria-controls="evolution-compare-results"
-          aria-activedescendant={
-            compareSearchOpen && compareMatches[activeCompareIndex]
-              ? `compare-option-${compareMatches[activeCompareIndex].id}`
-              : undefined
-          }
-          autoComplete="off"
-          onFocus={() => setCompareSearchOpen(true)}
-          onChange={(event) => {
-            setCompareQuery(event.target.value)
-            setCompareSearchOpen(true)
-            setActiveCompareIndex(0)
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'ArrowDown') {
-              event.preventDefault()
-              setCompareSearchOpen(true)
-              setActiveCompareIndex((current) =>
-                Math.min(current + 1, compareMatches.length - 1),
-              )
-            } else if (event.key === 'ArrowUp') {
-              event.preventDefault()
-              setActiveCompareIndex((current) => Math.max(0, current - 1))
-            } else if (event.key === 'Enter') {
-              event.preventDefault()
-              const match = compareMatches[activeCompareIndex]
-              if (match) selectCompareBeach(match.id)
-            } else if (event.key === 'Escape') {
-              setCompareSearchOpen(false)
-            }
-          }}
-          disabled={
-            compareIds.length >= comparisonLimit || compareOptions.length === 0
-          }
-        />
-        <button
-          type="button"
-          className="compare-add-btn"
-          aria-label={copy.addComparison}
-          disabled={
-            compareIds.length >= comparisonLimit || compareMatches.length === 0
-          }
-          onClick={addComparisonFromSearch}
-        >
-          <Plus size={15} />
-        </button>
-        {compareSearchOpen &&
-          compareIds.length < comparisonLimit &&
-          compareMatches.length > 0 && (
-            <div
-              id="evolution-compare-results"
-              className="compare-search-results"
-              role="listbox"
-            >
-              {compareMatches.map((beach, index) => (
-                <button
-                  key={beach.id}
-                  id={`compare-option-${beach.id}`}
-                  type="button"
-                  role="option"
-                  aria-selected={index === activeCompareIndex}
-                  title={beach.name}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onMouseEnter={() => setActiveCompareIndex(index)}
-                  onClick={() => selectCompareBeach(beach.id)}
-                >
-                  <span
-                    className="beach-swatch"
-                    style={{ background: beachColor(compareIds.length + 1) }}
-                    aria-hidden="true"
-                  />
-                  <span>
-                    <strong>
-                      {shortNameById.get(beach.id) ??
-                        shortBeachName(beach.name)}
-                    </strong>
-                    <small>
-                      {beach.district} › {beach.municipality}
-                    </small>
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-      </div>
-    </div>
-  )
+
+  const hourlyData: ChartPoint[] = Array.from({ length: 11 }, (_, index) => {
+    const hour = index + 8
+    const row: ChartPoint = { date: `${hour.toString().padStart(2, '0')}:00` }
+    activeBeaches.forEach((beach, beachIndex) => {
+      const reading = daytimeReadings(dayDetails.get(beach.id)?.hourly ?? []).find((item) => item.hour === hour)
+      const value = finite(metric === 'water' ? reading?.waterTemperatureCelsius : metric === 'wind' ? reading?.windKnots : reading?.airTemperatureCelsius)
+      writeReadings(row, `beach${beachIndex}`, { value }, period && period.start < today ? 'history' : 'forecast')
+    })
+    return row
+  })
+  prepareLines(hourlyData)
+  const displayedChart = hourlyMode && !dailyAirFallback ? hourlyData : chartData
+  const chartValues = displayedChart.flatMap((point) => Object.entries(point)
+    .filter(([key, value]) => key !== 'date' && (typeof value === 'number' || Array.isArray(value)))
+    .flatMap(([, value]) => typeof value === 'number' ? [value] : Array.isArray(value) ? value : []))
+  const hasChart = chartValues.length > 0 && !dailyAirFallback
+  const chartMin = Math.floor(chartValues.reduce((min, value) => Math.min(min, value), Infinity) - 1)
+  const chartMax = Math.ceil(chartValues.reduce((max, value) => Math.max(max, value), -Infinity) + 1)
+  const historicalCount = period?.dates.filter((date) => date < today).length ?? 0
+  const forecastCount = period?.dates.filter((date) => date >= today).length ?? 0
+  const hiddenSeries = !enabledStatistics.length || (!historicalCount && !visibility.forecast)
+  const summaryDays = period?.calendarDates.filter((date) => date < today || visibility.forecast).length ?? 0
+  const provenance = historicalCount && forecastCount && visibility.forecast ? t.mixed : historicalCount ? t.archive : t.currentForecast
+  const visibleDays = historicalCount + (visibility.forecast ? forecastCount : 0)
+  const readingHelp = hourlyMode ? dailyAirFallback ? t.airDaily : t.hourlyReading
+    : scope === 'territory' ? `${t.territoryReading} ${metric !== 'wind' ? t.temperatureReading : ''}` : t.beachReading
+  const periodLabel = period ? `${formatDate(period.start, language, true)}${singleDay ? '' : ` – ${formatDate(period.end, language, true)}`}` : ''
+  const periodInvalid = !calendarDayCount(pendingStart, dateMode === 'custom' ? pendingEnd : pendingStart)
+  const archiveLabel = archiveDates.length
+    ? `${t.archive} · ${formatDate(archiveDates[0], language, true)} – ${formatDate(lastArchive, language, true)}`
+    : t.noArchive
 
   return (
-    <main className={`evolution-view${selectedBeach ? ' has-selection' : ''}`}>
-      <section className="evolution-map-section">
-        <div className="evolution-map">
-          <Suspense
-            fallback={(
-              <div className="map-loading">
-                <LoadingIndicator variant="compact" label={copy.loadingHistory} />
-              </div>
-            )}
-          >
-            <PortugalMap
-              beaches={historicalBeaches}
-              districtWeather={[]}
-              activeDate={activeDate}
-              language={language}
-              selectedId={selectedId}
-              territory={territory}
-              theme={theme}
-              windUnit={windUnit}
-              mapMetric={mapMetric}
-              isMobile={isMobile}
-              clusterRadius={36}
-              clusterBaseZoom={6}
-              clusterZoomRate={1.65}
-              onSelect={handleSelect}
-              onClearSelection={() => {
-                setSelectedId('')
-                setCompareIds([])
-              }}
-            />
-          </Suspense>
-          {(rangeLoading || dateLoading) && (
-            <div className="map-loading evolution-range-loading">
-              <LoadingIndicator
-                variant="compact"
-                label={rangeLoading ? copy.loadingRange : copy.loading}
-              />
+    <main id="app-content" tabIndex={-1} className="evolution-page"
+      style={{ '--evo-metric': metricColor, '--evo-stats-height': `${Math.max(1, activeBeaches.length) * 32}px` } as CSSProperties}>
+      <div className="evo-content">
+        <section className="evo-controls" aria-label={t.chart}>
+          <div className="evo-comparison-row">
+            <TerritorySelect value={territory} language={language} onChange={onTerritoryChange} />
+            <div className="evo-search" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setSearchOpen(false) }}>
+              <Search size={17} aria-hidden="true" />
+              <input type="search" value={query} placeholder={t.chooseBeach}
+                aria-label={t.chooseBeach} role="combobox" aria-expanded={searchOpen}
+                aria-controls="evo-beach-results" aria-autocomplete="list" autoComplete="off"
+                aria-activedescendant={searchOpen && searchMatches[searchIndex] ? `evo-option-${searchMatches[searchIndex].id}` : undefined}
+                onFocus={() => setSearchOpen(true)}
+                onClick={() => setSearchOpen(true)}
+                onChange={(event) => { setQuery(event.target.value); setSearchIndex(0); setSearchOpen(true) }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') setSearchOpen(false)
+                  if (event.key === 'ArrowDown') { event.preventDefault(); setSearchOpen(true); setSearchIndex((index) => Math.max(0, Math.min(index + 1, searchMatches.length - 1))) }
+                  if (event.key === 'ArrowUp') { event.preventDefault(); setSearchIndex((index) => Math.max(0, index - 1)) }
+                  if (event.key === 'Enter' && searchOpen && searchMatches[searchIndex]) { event.preventDefault(); addBeach(searchMatches[searchIndex].id) }
+                }} />
+              <span className="evo-selection-count" title={t.compareHint}>{selectedBeaches.length}/4</span>
+              {searchOpen && (
+                <div className="evo-search-popover">
+                  <p role="status">{selectedBeaches.length === 4 ? t.maxBeaches : t.compareHint}</p>
+                  <div className="evo-search-results" id="evo-beach-results" role="listbox" aria-label={t.addBeach}>
+                    {searchMatches.map((beach, index) => (
+                      <button key={beach.id} id={`evo-option-${beach.id}`} role="option" type="button"
+                        aria-selected={index === searchIndex} aria-disabled={selectedBeaches.length >= 4}
+                        onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setSearchIndex(index)} onClick={() => addBeach(beach.id)}>
+                        <strong>{beach.name}</strong><span>{beach.municipality} · {beach.district}</span>
+                      </button>
+                    ))}
+                    {!searchMatches.length && <p>{t.noMatches}</p>}
+                  </div>
+                </div>
+              )}
             </div>
-          )}
+            <div className="evo-selected-beaches" aria-label={t.beaches}>
+              {selectedBeaches.map((beach, index) => (
+                <span className="evo-chip" key={beach.id} style={{ '--evo-beach': beachColor(index) } as CSSProperties}>
+                  <i aria-hidden="true" /><span title={beach.name}>{uniqueShortBeachName(beach, dataset.beaches)}</span>
+                  <button type="button" aria-label={`${t.remove} ${beach.name}`} onClick={() => setSelectedIds((ids) => ids.filter((id) => id !== beach.id))}><X size={14} /></button>
+                </span>
+              ))}
+              {!selectedBeaches.length && <span className="evo-average-context" title={t.compareHint}><i aria-hidden="true" />{t.territoryAverage}</span>}
+            </div>
+          </div>
 
-          <div className="evolution-map-controls">
-            <div
-              className="evolution-metric-tabs seg-control"
-              role="tablist"
-              aria-label={copy.mapMetric}
-            >
-              {([
-                ['water', copy.water, <Droplets key="water-icon" size={14} />],
-                ['air', copy.air, <ThermometerSun key="air-icon" size={14} />],
-                ['wind', copy.wind, <Wind key="wind-icon" size={14} />],
-              ] as const).map(([metric, label, icon]) => (
-                <button
-                  key={metric}
-                  role="tab"
-                  type="button"
-                  aria-selected={mapMetric === metric}
-                  className={`metric-tab metric-tab--${metric}${mapMetric === metric ? ' active' : ''}`}
-                  onClick={() => {
-                    setMapMetric(metric)
-                    if (metric !== 'wind') onMapMetricChange(metric)
-                  }}
-                >
-                  {icon}
-                  {label}
+          <div className="evo-toolbar">
+            <div className="evo-segment evo-metric-control" role="group" aria-label={t.metric}>
+              {([['water', Droplets], ['air', ThermometerSun], ['wind', Wind]] as const).map(([value, Icon]) => (
+                <button key={value} className={`metric-tab metric-tab--${value}${metric === value ? ' active' : ''}`} type="button" aria-pressed={metric === value} onClick={() => { setMetric(value); onMapMetricChange(value) }}>
+                  <Icon size={16} aria-hidden="true" />{t[value]}
                 </button>
               ))}
             </div>
-
-            <TerritorySelect
-              value={territory}
-              language={language}
-              onChange={onTerritoryChange}
-              className="evolution-territory-select"
-              elevated
-            />
-          </div>
-          <MapLegend language={language} metric={mapMetric} windUnit={windUnit} />
-        </div>
-
-        <div
-          className={`evolution-timeline-bar evolution-timeline-bar--${
-            viewMode === 'range' ? 'range' : 'day'
-          }`}
-        >
-          <div
-            className="evolution-mode-selector seg-control"
-            role="tablist"
-            aria-label={copy.evolutionModeSelector}
-          >
-            {(['one-day', 'range'] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                role="tab"
-                aria-selected={viewMode === mode}
-                className={viewMode === mode ? 'active' : ''}
-                onClick={() => {
-                  setIsPlaying(false)
-                  setViewMode(mode)
-                  if (mode === 'one-day' && activeDate) {
-                    setPendingDay(activeDate)
-                  } else if (
-                    mode === 'range' &&
-                    pendingStart &&
-                    pendingEnd &&
-                    pendingStart <= pendingEnd
-                  ) {
-                    void applyRange(pendingStart, pendingEnd)
+            <div className="evo-period">
+              <div className="evo-presets" role="group" aria-label={t.period}>
+                {(['all', 'month'] as const).map((value) => (
+                  <button key={value} type="button" aria-pressed={preset === value} disabled={indexLoading || indexError || !lastArchive}
+                    title={value === 'all' ? t.fullArchive : undefined} onClick={() => choosePreset(value)}>{t[value]}</button>
+                ))}
+              </div>
+              <details className="evo-date-control" ref={dateControl}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape' && dateControl.current) {
+                    dateControl.current.open = false
+                    dateControl.current.querySelector('summary')?.focus()
                   }
-                }}
-              >
-                {mode === 'one-day' ? copy.oneDayMode : copy.rangeMode}
-              </button>
-            ))}
-          </div>
-          {viewMode === 'one-day' ? (
-            <>
-              <label className="timeline-field">
-                <span>{copy.rangeStart}</span>
-                <input
-                  type="date"
-                  value={pendingDay || activeDate}
-                  min={availableHistoryDates[0] ?? dataset.forecastDates[0]}
-                  max={dataset.forecastDates[dataset.forecastDates.length - 1]}
-                  onChange={(event) => {
-                    const nextDate = event.target.value
-                    setIsPlaying(false)
-                    setPendingDay(nextDate)
-                    const nextIndex = allDates.indexOf(nextDate)
-                    if (nextIndex >= 0) {
-                      setRangeError(null)
-                      setDateIndex(nextIndex)
-                    } else if (nextDate) {
-                      void applyRange(nextDate, nextDate)
-                    }
-                  }}
-                />
-              </label>
-              <div className="evolution-single-date-meta">
-                {relativeLabel && (
-                  <span
-                    className={`date-kind-badge ${activeKind}`}
-                    title={`${relativeLabel.relative} · ${relativeLabel.compactDate}`}
-                    aria-label={relativeLabel.relative}
-                  >
-                    {relativeLabel.relative}
-                  </span>
-                )}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="evolution-range-fields" role="group" aria-label={copy.rangeMode}>
-                <label className="timeline-field">
-                  <span>{copy.rangeStart}</span>
-                  <input
-                    type="date"
-                    value={pendingStart}
-                    min={availableHistoryDates[0] ?? dataset.forecastDates[0]}
-                    max={pendingEnd || dataset.forecastDates[dataset.forecastDates.length - 1]}
-                    onChange={(event) => setPendingStart(event.target.value)}
-                  />
-                </label>
-                <label className="timeline-field">
-                  <span>{copy.rangeEnd}</span>
-                  <input
-                    type="date"
-                    value={pendingEnd}
-                    min={pendingStart || availableHistoryDates[0] || dataset.forecastDates[0]}
-                    max={dataset.forecastDates[dataset.forecastDates.length - 1]}
-                    onChange={(event) => setPendingEnd(event.target.value)}
-                  />
-                </label>
-              </div>
-              <button
-                type="button"
-                className="timeline-apply-btn"
-                disabled={rangeLoading || !pendingStart || !pendingEnd || invalidPendingRange}
-                onClick={() => {
-                  setIsPlaying(false)
-                  void applyRange(pendingStart, pendingEnd)
-                }}
-              >
-                {rangeLoading ? copy.loadingRange : copy.applyRange}
-              </button>
-              <span className="evolution-range-status">
-                <strong>{allDates.length} {copy.daysLoaded}</strong>
-                <small>{copy.historyLabel} + {copy.forecastLabel}</small>
-              </span>
-              <div className="evolution-playback">
-                <button
-                  type="button"
-                  className="play-btn"
-                  aria-label={isPlaying ? copy.pause : copy.play}
-                  title={playTitle}
-                  disabled={!canPlay}
+                }}>
+                <summary aria-label={t.pickDate} title={periodLabel || undefined}
                   onClick={() => {
-                    if (!canPlay) return
-                    if (!isPlaying && dateIndex >= allDates.length - 1) setDateIndex(0)
-                    setIsPlaying((value) => !value)
-                  }}
-                >
-                  {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-                </button>
-                <div className="timeline-track">
-                  <input
-                    type="range"
-                    className="date-slider"
-                    min={0}
-                    max={Math.max(0, allDates.length - 1)}
-                    value={dateIndex}
-                    disabled={!canPlay}
-                    onChange={(event) => {
-                      setIsPlaying(false)
-                      setDateIndex(Number(event.target.value))
-                    }}
-                    aria-label={copy.historicalDate}
-                    aria-valuetext={
-                      activeDate
-                        ? `${formatDate(activeDate, language, { year: 'numeric' })}, ${relativeLabel?.relative ?? ''}`
-                        : ''
-                    }
-                  />
-                  <div className="timeline-track-labels">
-                    <span>
-                      {allDates[0]
-                        ? formatDate(allDates[0], language, { year: '2-digit' })
-                        : ''}
-                    </span>
-                    <div className="evolution-active-date">
-                      <strong>
-                        {activeDate
-                          ? formatDate(activeDate, language, { year: 'numeric' })
-                          : ''}
-                      </strong>
-                      <span
-                        className={`date-kind-badge ${activeKind}`}
-                        title={
-                          relativeLabel
-                            ? `${relativeLabel.relative} · ${relativeLabel.compactDate}`
-                            : undefined
-                        }
-                        aria-label={relativeLabel?.relative}
-                      >
-                        {relativeLabel?.relative}
-                      </span>
-                    </div>
-                    <span>
-                      {formatDate(
-                        allDates[allDates.length - 1] ?? activeDate,
-                        language,
-                        { year: '2-digit' },
-                      )}
-                    </span>
+                    if (dateControl.current?.open) return
+                    setDateMode(preset === 'day' || preset === 'week' || preset === 'month' ? preset : 'custom')
+                    setPendingStart(period?.start || lastArchive || forecastDate)
+                    setPendingEnd(period?.end || lastArchive || forecastDate)
+                  }}>
+                  <CalendarDays size={16} aria-hidden="true" />
+                  <span>{t.pickDate}</span>
+                  <ChevronDown size={14} aria-hidden="true" />
+                </summary>
+                <div className="evo-date-popover">
+                  <div className="evo-date-heading">
+                    <strong>{t.pickDate}</strong>
+                    <button type="button" className="evo-icon-button" aria-label={t.close} onClick={() => { if (dateControl.current) { dateControl.current.open = false; dateControl.current.querySelector('summary')?.focus() } }}><X size={17} /></button>
                   </div>
-                </div>
-              </div>
-            </>
-          )}
-          {timelineError && (
-            <span
-              className={invalidPendingRange ? 'range-error' : 'history-load-error'}
-              role="alert"
-            >
-              {timelineError}
-            </span>
-          )}
-        </div>
-
-        <div className="evolution-aggregate">
-          <div className="evolution-aggregate-header">
-            <div>
-              <strong>{copy.scopeAggregateTitle}</strong>
-            </div>
-            {activeMetricAggregate && !singleDayMode ? (
-              <div className="evolution-aggregate-summary">
-                <span>
-                  <strong>{copy.minimum}</strong>
-                  {formatMetricValue(mapMetric, activeMetricAggregate.min, windUnit)}
-                </span>
-                <span>
-                  <strong>{copy.average}</strong>
-                  {formatMetricValue(mapMetric, activeMetricAggregate.avg, windUnit)}
-                </span>
-                <span>
-                  <strong>{copy.maximum}</strong>
-                  {formatMetricValue(mapMetric, activeMetricAggregate.max, windUnit)}
-                </span>
-                {!singleDayMode && activeMetricAggregate.coverage < 1 && (
-                  <span>
-                    <strong>{copy.coverageLabel}</strong>
-                    {`${Math.round(activeMetricAggregate.coverage * 100)}%`}
-                  </span>
-                )}
-              </div>
-            ) : (
-              <p className="aggregate-empty">{copy.noAggregateData}</p>
-            )}
-          </div>
-
-          {singleDayMode ? (
-            <div className="territory-dist">
-              {activeMetricAggregate ? (
-                <>
-                  <div className="territory-dist-track" style={territoryDistStyle}>
-                    <span className="territory-dist-line" aria-hidden="true" />
-                    <div className="territory-dist-point territory-dist-point--min">
-                      <span className="dist-marker dist-marker--min" />
-                      <strong>
-                        {formatMetricValue(
-                          mapMetric,
-                          activeMetricAggregate.min,
-                          windUnit,
-                        )}
-                      </strong>
-                      <small>{copy.minimum}</small>
-                    </div>
-                    <div className="territory-dist-point territory-dist-point--avg">
-                      <span className="dist-marker dist-marker--avg" />
-                      <strong>
-                        {formatMetricValue(
-                          mapMetric,
-                          activeMetricAggregate.avg,
-                          windUnit,
-                        )}
-                      </strong>
-                      <small>{copy.average}</small>
-                    </div>
-                    <div className="territory-dist-point territory-dist-point--max">
-                      <span className="dist-marker dist-marker--max" />
-                      <strong>
-                        {formatMetricValue(
-                          mapMetric,
-                          activeMetricAggregate.max,
-                          windUnit,
-                        )}
-                      </strong>
-                      <small>{copy.maximum}</small>
-                    </div>
-                  </div>
-                  {activeMetricAggregate.coverage < 1 && (
-                    <p className="territory-coverage-note">
-                      {copy.dataCoverage
-                        .replace(
-                          '{count}',
-                          Math.round(activeMetricAggregate.coverage * territoryBeaches.length).toString(),
-                        )
-                        .replace('{total}', territoryBeaches.length.toString())}
-                    </p>
-                  )}
-                </>
-              ) : (
-                <p className="aggregate-empty">{copy.noAggregateData}</p>
-              )}
-            </div>
-          ) : (
-            <>
-              <div className="evolution-aggregate-chart">
-                {chartValues.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
-                      <CartesianGrid stroke="var(--cp-border)" vertical={false} />
-                      <XAxis
-                        dataKey="label"
-                        axisLine={false}
-                        tickLine={false}
-                        minTickGap={20}
-                        tick={{ fill: 'var(--cp-text-muted)', fontSize: 10 }}
-                      />
-                      <YAxis
-                        domain={chartDomain}
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: 'var(--cp-text-muted)', fontSize: 10 }}
-                        width={44}
-                        tickFormatter={(value) => `${value}${mapMetric === 'wind' ? '' : '°'}`}
-                      />
-                      <Tooltip
-                        content={(props) => (
-                          <ChartTooltip
-                            {...props}
-                            suffix={mapMetric === 'wind' ? ` ${windUnitLabel}` : ' °C'}
-                            seriesLabels={{
-                              Min: copy.minimum,
-                              Avg: copy.average,
-                              Max: copy.maximum,
-                            }}
-                            seriesSuffixes={{
-                              Min: mapMetric === 'wind' ? ` ${windUnitLabel}` : ' °C',
-                              Avg: mapMetric === 'wind' ? ` ${windUnitLabel}` : ' °C',
-                              Max: mapMetric === 'wind' ? ` ${windUnitLabel}` : ' °C',
-                            }}
-                          />
-                        )}
-                      />
-                      {forecastLabels.length > 0 && (
-                        <ReferenceArea
-                          x1={forecastLabels[0]}
-                          x2={forecastLabels[forecastLabels.length - 1]}
-                          fill={metricColor}
-                          fillOpacity={0.035}
-                          strokeOpacity={0}
-                        />
-                      )}
-                      <Area
-                        type="monotone"
-                        dataKey="historyRange"
-                        fill={metricAvgColor}
-                        fillOpacity={0.14}
-                        stroke={metricAvgColor}
-                        strokeOpacity={0.22}
-                        activeDot={false}
-                        isAnimationActive={false}
-                      />
-                      <Line
-                        type="monotone"
-                        connectNulls={false}
-                        dataKey="historyMin"
-                        stroke={metricMinColor}
-                        strokeWidth={1.2}
-                        dot={false}
-                        activeDot={{
-                          r: 4,
-                          fill: metricMinColor,
-                          stroke: metricMinColor,
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        connectNulls={false}
-                        dataKey="historyAvg"
-                        stroke={metricAvgColor}
-                        strokeWidth={2}
-                        dot={false}
-                        activeDot={{
-                          r: 4.5,
-                          fill: metricAvgColor,
-                          stroke: metricAvgColor,
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        connectNulls={false}
-                        dataKey="historyMax"
-                        stroke={metricMaxColor}
-                        strokeWidth={1.2}
-                        dot={false}
-                        activeDot={{
-                          r: 5,
-                          fill: metricMaxColor,
-                          stroke: metricMaxColor,
-                        }}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="forecastRange"
-                        fill={metricAvgColor}
-                        fillOpacity={0.09}
-                        stroke={metricAvgColor}
-                        strokeOpacity={0.18}
-                        activeDot={false}
-                        isAnimationActive={false}
-                      />
-                      <Line
-                        type="monotone"
-                        connectNulls={false}
-                        dataKey="forecastMin"
-                        stroke={metricMinColor}
-                        strokeWidth={1.2}
-                        strokeDasharray="6 4"
-                        dot={false}
-                        activeDot={{
-                          r: 4,
-                          fill: metricMinColor,
-                          stroke: metricMinColor,
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        connectNulls={false}
-                        dataKey="forecastAvg"
-                        stroke={metricAvgColor}
-                        strokeWidth={2}
-                        strokeDasharray="6 4"
-                        dot={false}
-                        activeDot={{
-                          r: 4.5,
-                          fill: metricAvgColor,
-                          stroke: metricAvgColor,
-                        }}
-                      />
-                      <Line
-                        type="monotone"
-                        connectNulls={false}
-                        dataKey="forecastMax"
-                        stroke={metricMaxColor}
-                        strokeWidth={1.2}
-                        strokeDasharray="6 4"
-                        dot={false}
-                        activeDot={{
-                          r: 5,
-                          fill: metricMaxColor,
-                          stroke: metricMaxColor,
-                        }}
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <p className="aggregate-empty">{copy.noAggregateData}</p>
-                )}
-              </div>
-              <div className="agg-chart-key">
-                <span><i className="agg-key-band" style={{ background: metricColor }} />{copy.historyLabel}</span>
-                <span><i className="agg-key-band agg-key-band--dashed" style={{ borderColor: metricColor }} />{copy.forecastLabel}</span>
-              </div>
-            </>
-          )}
-        </div>
-      </section>
-
-      {selectedBeach && (
-        <aside
-          className={`evolution-chart-panel ${
-            singleDayMode ? 'evolution-chart-panel--day' : 'evolution-chart-panel--range'
-          }`}
-          aria-label={copy.evolutionTitle}
-        >
-          <div className="evolution-chart-header">
-            <div>
-              <span className="evolution-panel-path">
-                {selectedBeach.district} › {selectedBeach.municipality}
-              </span>
-              <strong className="panel-beach-title">
-                <span
-                  className="beach-swatch"
-                  style={{ background: beachColor(0) }}
-                  aria-hidden="true"
-                />
-                {selectedBeach.name}
-              </strong>
-              {!singleDayMode && activeKind === 'history' && (
-                <span className="evolution-archive-notice">
-                  <strong>{copy.archiveNoticeTitle}</strong>
-                  <span className="date-kind-badge history" title={copy.archivedForecast}>
-                    {copy.archivedBadge}
-                  </span>
-                </span>
-              )}
-            </div>
-            <button
-              type="button"
-              aria-label={copy.close}
-              onClick={() => {
-                setSelectedId('')
-                setCompareIds([])
-              }}
-            >
-              <X size={16} />
-            </button>
-          </div>
-
-          {!singleDayMode && comparisonControls}
-
-          <div className="evolution-chart-canvas">
-            {singleDayMode ? (
-              <div className="daily-detail">
-                {comparisonControls}
-                <section className="daily-comparison-section">
-                  <div className="daily-section-header">
-                    <strong>{copy.comparisonTable}</strong>
-                  </div>
-                  {compareDayLoading && (
-                    <LoadingIndicator variant="compact" label={copy.loading} />
-                  )}
-                  <div className="daily-comparison-table" role="table" aria-label={copy.comparisonTable}>
-                    <div
-                      className="daily-comparison-row daily-comparison-row--head"
-                      role="row"
-                      style={comparisonGridStyle}
-                    >
-                      <span role="columnheader">{copy.metric}</span>
-                      {comparisonRows.map(({ beach, shortName }, index) => (
-                        <span
-                          key={beach.id}
-                          role="columnheader"
-                          className="beach-name-cell"
-                          title={beach.name}
-                        >
-                          <i
-                            className="beach-swatch"
-                            style={{ background: beachColor(index) }}
-                            aria-hidden="true"
-                          />
-                          {shortName}
-                        </span>
-                      ))}
-                    </div>
-                    {comparisonMetricsWithWinner.map((metric) => (
-                      <div
-                        key={metric.key}
-                        className={`daily-comparison-row${mapMetric === metric.key ? ' metric-row-active' : ''}`}
-                        role="row"
-                        style={comparisonGridStyle}
-                      >
-                        <span role="rowheader">{metric.label}</span>
-                        {metric.values.map((value, index) => (
-                          <span key={`${metric.key}-${comparisonRows[index]?.beach.id ?? index}`} role="cell">
-                            <b>{metric.format(value)}</b>
-                            {index === metric.winnerIndex && (
-                              <small className="comparison-win-delta">
-                                {formatWinningDelta(
-                                  value,
-                                  metric.values[index === 0 ? 1 : 0],
-                                  metric.key === 'wind' ? windUnit : undefined,
-                                )}
-                              </small>
-                            )}
-                          </span>
-                        ))}
-                      </div>
+                  <div className="evo-segment evo-date-modes" role="group" aria-label={t.period}>
+                    {(['day', 'week', 'month', 'custom'] as const).map((value) => (
+                      <button type="button" key={value} aria-pressed={dateMode === value}
+                        disabled={(value === 'week' || value === 'month') && (!lastArchive || indexError)} onClick={() => {
+                        setDateMode(value)
+                        if (dateMode === 'custom' && value !== 'custom') setPendingStart(period?.end || lastArchive || forecastDate)
+                      }}>{t[value]}</button>
                     ))}
                   </div>
-                </section>
-
-                <section className="daily-hourly-section daily-hourly-section--primary">
-                  <div className="daily-section-header">
-                    <strong>{copy.hourlyTitle}</strong>
-                    <span>08:00–18:00 · °C · {windUnitLabel}</span>
-                  </div>
-                  {dayDetailLoading ? (
-                    <LoadingIndicator variant="compact" label={copy.loading} />
-                  ) : dayDetail && daytimeReadings(dayDetail.hourly).length > 0 ? (
-                    <div
-                      className={`daily-hourly-table${hourlyBeachDetails.length > 1 ? ' daily-hourly-table--compare' : ''}`}
-                      role="table"
-                      aria-label={copy.hourlyTitle}
-                    >
-                      <div
-                        className="daily-hourly-group-head"
-                        role="row"
-                        style={hourlyGroupGridStyle}
-                      >
-                        <span role="columnheader">{copy.time}</span>
-                        {hourlyBeachDetails.map(({ beach, shortName }, index) => (
-                          <span
-                            key={beach.id}
-                            role="columnheader"
-                            className="beach-name-cell hourly-beach-group"
-                            title={beach.name}
-                          >
-                            <i
-                              className="beach-swatch"
-                              style={{ background: beachColor(index) }}
-                              aria-hidden="true"
-                            />
-                            {shortName}
-                          </span>
-                        ))}
-                      </div>
-                      <div
-                        className="daily-hourly-row daily-hourly-row--head"
-                        role="row"
-                        style={hourlyMetricGridStyle}
-                      >
-                        <span aria-hidden="true" />
-                        {hourlyBeachDetails.flatMap(({ beach }, index) => [
-                          <span
-                            key={`${beach.id}-water`}
-                            role="columnheader"
-                            className={`${index > 0 ? 'hourly-beach-start ' : ''}${
-                              mapMetric === 'water' ? 'metric-emphasis' : ''
-                            }`}
-                            title={`${beach.name} · ${copy.water}`}
-                          >
-                            {copy.water}
-                          </span>,
-                          <span
-                            key={`${beach.id}-wind`}
-                            role="columnheader"
-                            className={mapMetric === 'wind' ? 'metric-emphasis' : undefined}
-                            title={`${beach.name} · ${copy.wind}`}
-                          >
-                            {copy.wind}
-                          </span>,
-                        ])}
-                      </div>
-                      {hourlyComparisonRows.map(({ hour, readings }) => (
-                        <div
-                          key={hour}
-                          className="daily-hourly-row"
-                          role="row"
-                          style={hourlyMetricGridStyle}
-                        >
-                          <span role="cell">
-                            {`${hour.toString().padStart(2, '0')}:00`}
-                          </span>
-                          {readings.flatMap((reading, index) => {
-                            const beach = hourlyBeachDetails[index]?.beach
-                            const key = beach?.id ?? `missing-${index}`
-                            return [
-                              <span
-                                key={`${key}-${hour}-water`}
-                                role="cell"
-                                className={`${index > 0 ? 'hourly-beach-start ' : ''}${
-                                  mapMetric === 'water' ? 'metric-emphasis' : ''
-                                }`}
-                              >
-                                {formatTemperatureNumber(
-                                  reading?.waterTemperatureCelsius,
-                                )}
-                              </span>,
-                              <span
-                                key={`${key}-${hour}-wind`}
-                                role="cell"
-                                className={mapMetric === 'wind' ? 'metric-emphasis' : undefined}
-                              >
-                                <WindReading
-                                  knots={reading?.windKnots}
-                                  direction={reading?.windDirection}
-                                  windUnit={windUnit}
-                                  colour={beachColor(index)}
-                                />
-                              </span>,
-                            ]
-                          })}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="daily-empty">
-                      {dayDetailError ? copy.detailUnavailable : copy.noHourlyData}
-                    </p>
-                  )}
-                </section>
-              </div>
-            ) : (
-              <Suspense
-                fallback={(
-                  <div className="chart-loading">
-                    <LoadingIndicator variant="compact" label={copy.loadingHistory} />
-                  </div>
-                )}
-              >
-                <div className="side-chart-heading">
-                  <strong>
-                    {metricEvolutionTitle}{' '}
-                    <small>({metricUnit})</small>
-                  </strong>
+                  <form className="evo-date-fields" onSubmit={(event) => {
+                    event.preventDefault()
+                    if (dateMode === 'custom') applyPeriod(pendingStart, pendingEnd, 'custom')
+                    else choosePreset(dateMode, pendingStart)
+                  }}>
+                    <label className="evo-field"><span>{dateMode === 'custom' ? t.from : t.day}</span>
+                      <input type="date" value={pendingStart} min={availableDates[0]} max={dateMode === 'week' || dateMode === 'month' ? lastArchive : availableDates.at(-1)}
+                        required onChange={(event) => setPendingStart(event.target.value)} />
+                    </label>
+                    {dateMode === 'custom' && <label className="evo-field"><span>{t.to}</span>
+                      <input type="date" value={pendingEnd} min={pendingStart || availableDates[0]} max={availableDates.at(-1)} required onChange={(event) => setPendingEnd(event.target.value)} />
+                    </label>}
+                    <button className="evo-primary" type="submit" disabled={periodInvalid || indexLoading || !availableDates.length}>{t.apply}</button>
+                    {periodInvalid && pendingStart && pendingEnd && <p className="evo-note" role="status">{t.periodError}</p>}
+                  </form>
+                  <p className="evo-note" title={t.rangeHint}>{indexError ? t.indexError : archiveLabel}</p>
+                  {forecastDate && <div className="evo-forecast-choice">
+                    <span>{t.forecastSection}</span>
+                    <button className="evo-text-button" type="button" onClick={() => choosePreset('day', forecastDate)}>{forecastDate === today ? t.forecastDay : t.latestForecast}</button>
+                  </div>}
                 </div>
-                {rangeHistoryLoading && (
-                  <LoadingIndicator
-                    variant="compact"
-                    label={copy.loadingHistory}
-                  />
-                )}
-                <MetricHistoryChart
-                  history={selectedHistory}
-                  forecasts={selectedBeach.daily}
-                  language={language}
-                  windUnit={windUnit}
-                  compareHistories={compareHistories}
-                  controlledMetric={mapMetric === 'wind' ? 'wind' : mapMetric}
-                  hideTabs
-                  primaryBeach={selectedBeach}
-                  primaryDisplayName={
-                    shortNameById.get(selectedBeach.id) ??
-                    shortBeachName(selectedBeach.name)
-                  }
-                />
-              </Suspense>
-            )}
+              </details>
+            </div>
           </div>
-        </aside>
-      )}
+        </section>
+
+        {indexError && <div className="evo-message" role="status">{t.indexError}<button type="button" onClick={() => setIndexRetry((value) => value + 1)}>{t.retry}</button></div>}
+        {periodError && <div className="evo-message" role="alert">{periodError === 'invalid' ? t.periodError : t.outsideArchive}</div>}
+
+        <div className="evo-workspace">
+          <section className="evo-map-section evo-card" aria-label={`${t.map}: ${territoryName}`}>
+            <header className="evo-map-heading">
+              <strong>{t.map}</strong>
+              <label className="evo-map-date"><span>{t.day}</span>
+                <input type="date" aria-label={t.mapDate} value={mapDate} min={period?.start} max={period?.end} disabled={!mapDates.length}
+                  onChange={(event) => {
+                    const index = mapDates.indexOf(event.target.value)
+                    if (index >= 0) setMapIndex(index)
+                  }} />
+              </label>
+              {!singleDay && <button type="button" className="evo-text-button" disabled={!mapDate} onClick={() => choosePreset('day', mapDate)}>{t.viewDay}</button>}
+            </header>
+            <div className="evo-map-canvas">
+              <Suspense fallback={<div className="map-loading"><LoadingIndicator variant="compact" label={copy.loading} /></div>}>
+                <PortugalMap beaches={mapBeaches} districtWeather={[]} activeDate={mapDate} language={language} selectedId={scope === 'beaches' ? selectedIds[0] ?? '' : ''}
+                  territory={territory} theme={theme} windUnit={windUnit} mapMetric={metric} isMobile={isMobile} clusterRadius={36} clusterBaseZoom={6} clusterZoomRate={1.65}
+                  onSelect={selectMapBeach} onClusterSelect={(id) => addBeach(id)} onClearSelection={() => setSelectedIds([])} />
+              </Suspense>
+              <MapLegend language={language} metric={metric} windUnit={windUnit} />
+              {(indexLoading || mapLoading) && <div className="map-loading"><LoadingIndicator variant="compact" label={copy.loading} /></div>}
+              {!indexLoading && !mapLoading && (!mapDates.length || !mapBeaches.length || mapError) && (
+                <div className="evo-map-notice" role={mapError ? 'alert' : 'status'}>
+                  <span>{mapError ? t.loadError : mapDates.length ? t.mapEmpty : preset === 'all' && !indexError ? t.noArchive : t.outsideArchive}</span>
+                  {mapError && <button className="evo-text-button" type="button" onClick={() => setRetry((value) => value + 1)}>{t.retry}</button>}
+                </div>
+              )}
+            </div>
+            <p className="evo-map-hint">{t.mapHint}</p>
+          </section>
+
+        <section className="evo-chart-card evo-card" aria-labelledby="evo-chart-title" aria-busy={loading}>
+          <header className="evo-chart-heading">
+            <h1 id="evo-chart-title">{t[metric]} <span>· {unit}</span></h1>
+            <span className="evo-chart-context">{periodLabel}</span>
+          </header>
+
+          {loading ? (
+            <div className="evo-chart-placeholder" role="status"><LoadingIndicator variant="compact" label={t.loading} /></div>
+          ) : loadError ? (
+            <div className="evo-chart-placeholder" role="alert"><p>{t.loadError}</p><button className="evo-primary" type="button" onClick={() => setRetry((value) => value + 1)}>{t.retry}</button></div>
+          ) : !hasDates ? (
+            <div className="evo-chart-placeholder"><CalendarDays size={26} aria-hidden="true" /><p>{indexError ? t.indexError : preset === 'all' ? t.noArchive : t.outsideArchive}</p></div>
+          ) : dailyAirFallback && !hiddenSeries ? (
+            <div className="evo-air-day">
+              <p>{t.airDaily}</p>
+              {activeBeaches.map((beach, index) => {
+                const readings = summaries[index].values[0]
+                return <div className="evo-summary-row" key={beach.id}><strong><i style={{ background: series[index].color }} />{series[index].name}</strong><dl>
+                  {enabledStatistics.map((statistic) => <div key={statistic}><dt>{statisticLabels[statistic]}</dt><dd>{formatValue(readings?.[statistic])}</dd></div>)}
+                </dl></div>
+              })}
+            </div>
+          ) : hasChart ? (
+            <div className="evo-chart" role="img" aria-label={`${t.chart}: ${scope === 'territory' ? territoryName : series.map((item) => item.name).join(', ')}, ${t[metric]}, ${periodLabel}`}>
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart accessibilityLayer data={displayedChart} margin={{ top: 14, right: 14, left: -12, bottom: 4 }}
+                  onClick={(state) => {
+                    if (hourlyMode || !state?.activeLabel) return
+                    const index = mapDates.indexOf(String(state.activeLabel))
+                    if (index >= 0) setMapIndex(index)
+                  }}>
+                  <CartesianGrid vertical={false} stroke="var(--cp-border)" strokeDasharray="3 5" />
+                  <XAxis dataKey="date" axisLine={false} tickLine={false} minTickGap={isMobile ? 30 : 42} tick={{ fill: 'var(--cp-text-muted)', fontSize: 12 }}
+                    tickFormatter={(date: string) => hourlyMode ? date : formatDate(date, language)} />
+                  <YAxis width={56} axisLine={false} tickLine={false} domain={[metric === 'wind' ? Math.max(0, chartMin) : chartMin, chartMax]} tick={{ fill: 'var(--cp-text-muted)', fontSize: 12 }} />
+                  <Tooltip content={({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null
+                    const row = payload[0]?.payload as ChartPoint | undefined
+                    if (!row) return null
+                    const kind = hourlyMode ? period && period.start < today ? 'history' : 'forecast' : row.date < today ? 'history' : 'forecast'
+                    if (kind === 'forecast' && !visibility.forecast) return null
+                    return <div className="evo-tooltip"><strong>{hourlyMode ? `${periodLabel} · ${label}` : formatDate(String(label), language, true)}</strong><small>{kind === 'history' ? t.dayKindArchive : t.dayKindForecast} · {unit}</small>
+                      <table><thead><tr><th scope="col">{scope === 'territory' ? t.territoryAverage : t.beaches}</th>{enabledStatistics.map((statistic) => <th scope="col" key={statistic}>{statisticLabels[statistic]}</th>)}</tr></thead>
+                        <tbody>{series.map((item) => <tr key={item.key}>
+                          <th scope="row"><i style={{ background: item.color }} aria-hidden="true" />{item.name}</th>
+                          {enabledStatistics.map((statistic) => {
+                            const value = row[`${kind}_${item.key}_${statistic}`]
+                            return <td key={statistic}>{typeof value === 'number' ? value.toFixed(1) : '—'}</td>
+                          })}
+                        </tr>)}</tbody>
+                      </table>
+                    </div>
+                  }} />
+                  {enabledStatistics.includes('min') && enabledStatistics.includes('max') && series.flatMap((item) => kinds.map((kind) => (
+                   <Area key={`${kind}_${item.key}_range`} type="linear" dataKey={`${kind}_${item.key}_range`}
+                     connectNulls={false} stroke="none" fill={item.color} fillOpacity={scope === 'territory' ? 0.12 : 0.055}
+                     activeDot={false} isAnimationActive={false} />
+                  )))}
+                  {series.flatMap((item) => enabledStatistics.flatMap((statistic) => kinds.map((kind) => (
+                   <Line key={`${kind}_${item.key}_${statistic}`} dataKey={`${kind}_${item.key}_${statistic}_line`} type="linear" connectNulls={false} stroke={item.color}
+                     strokeWidth={statistic === 'min' ? 1.6 : 2.5} strokeDasharray={kind === 'forecast' ? '6 5' : statistic === 'min' ? '2 3' : undefined}
+                      dot={(props) => {
+                        const index = props.index ?? 0
+                        const key = `${kind}_${item.key}_${statistic}_line`
+                        const value = displayedChart[index]?.[key]
+                        const isolated = typeof displayedChart[index - 1]?.[key] !== 'number' && typeof displayedChart[index + 1]?.[key] !== 'number'
+                        return typeof value === 'number' && (displayedChart.length < 45 || isolated)
+                          ? <circle key={`${key}-${index}`} cx={props.cx} cy={props.cy} r={isolated ? 3 : 2} fill={item.color} strokeWidth={0} />
+                          : <g key={`${key}-${index}`} />
+                      }}
+                      activeDot={{ r: 5, fill: item.color }} isAnimationActive={false} />
+                  ))))}
+                  {!hourlyMode && mapDate && <ReferenceLine x={mapDate} stroke="var(--cp-text-muted)" strokeDasharray="3 3" strokeWidth={1.5} />}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <div className="evo-chart-placeholder" role="status"><p>{hiddenSeries ? t.hiddenSeries : t.noData}</p></div>}
+
+          {hasDates && !loading && !loadError && (
+            <>
+              <ChartSeriesLegend language={language} visibility={visibility} statistics={statistics} showForecast={forecastCount > 0}
+                help={`${readingHelp} ${t.legendHelp}`} onToggle={(key) => setVisibility((value) => ({ ...value, [key]: !value[key] }))} />
+              {hourlyMode && !dailyAirFallback && <p className="evo-reading">{t.hourlyKey}{hourlyUtc ? ' · UTC' : ''}</p>}
+              {missingHourlyAir.length > 0 && <p className="evo-note">
+                {language === 'pt' ? 'Sem ar horário' : 'No hourly air'}: {missingHourlyAir.map((beach) => uniqueShortBeachName(beach, dataset.beaches)).join(', ')}
+              </p>}
+              {!hourlyMode && !hiddenSeries && <div className="evo-stats-scroll">
+                <table className="evo-stats" aria-label={t.periodSummary} title={scope === 'territory' ? t.territorySummary : t.beachSummary}>
+                  <thead><tr><th scope="col">{scope === 'territory' ? t.territoryAverage : t.beaches}</th>{enabledStatistics.map((statistic) => <th scope="col" key={statistic}>{statisticLabels[statistic]}</th>)}</tr></thead>
+                  <tbody>{summaries.map((summary) => <tr key={summary.id}>
+                      <th scope="row" title={`${summary.values.length} ${t.of} ${summaryDays} ${t.coverage}`}>
+                        <i style={{ background: summary.color }} aria-hidden="true" />{summary.name}
+                        {summary.values.length < summaryDays && <small>{summary.values.length}/{summaryDays} {t.coverage}</small>}
+                      </th>
+                      {enabledStatistics.map((statistic) => {
+                        const result = summarizeChartStatistic(summary.values, statistic)
+                        return <td key={statistic} title={`${result.date ? `${formatDate(result.date, language, true)} · ` : ''}${result.count}/${summaryDays} ${t.coverage}`}>{formatValue(result.value)}</td>
+                      })}
+                    </tr>)}</tbody>
+                </table>
+              </div>}
+              {partialError && <p className="evo-message" role="status">{t.partialError}<button type="button" onClick={() => setRetry((value) => value + 1)}>{t.retry}</button></p>}
+            </>
+          )}
+          {period && <footer className="evo-provenance" title={t.archiveNote} aria-label={`${provenance} · ${visibleDays} ${t.days}. ${t.archiveNote}`}>
+            <span>{provenance} · {visibleDays} {t.days} · {t.forecasts}</span>
+            {period.clipped && <span>{t.clipped}</span>}
+            {Boolean(period.missingDays) && <span>{period.missingDays} {t.gap}</span>}
+          </footer>}
+        </section>
+        </div>
+
+        {hourlyMode && hasChart && !loading && !loadError && (
+          <details className="evo-hourly evo-card">
+            <summary>{t.hourly}{metric === 'wind' ? ` · ${t.windDirection}` : ''}<ChevronDown size={18} aria-hidden="true" /></summary>
+            {metric === 'wind' && <p className="evo-note">{t.windDirectionNote}</p>}
+            <div className="evo-hourly-scroll" tabIndex={0} role="region" aria-label={t.hourly}>
+              <table><caption>{periodLabel} · {unit}{hourlyUtc ? ' · UTC' : ''}</caption><thead><tr><th scope="col">{t.time}</th>{activeBeaches.map((beach, index) => <th key={beach.id} scope="col">{series[index].name}</th>)}</tr></thead>
+                <tbody>{Array.from({ length: 11 }, (_, index) => index + 8).map((hour) => <tr key={hour}><th scope="row">{`${hour.toString().padStart(2, '0')}:00`}</th>
+                  {activeBeaches.map((beach) => {
+                    const reading = daytimeReadings(dayDetails.get(beach.id)?.hourly ?? []).find((item) => item.hour === hour)
+                    const value = finite(metric === 'water' ? reading?.waterTemperatureCelsius : metric === 'air' ? reading?.airTemperatureCelsius : reading?.windKnots)
+                    const direction = reading?.windDirection
+                    const degrees = windDirectionDegrees(direction)
+                    return <td key={beach.id}>{value === undefined ? '—' : displayValue(value).toFixed(1)}
+                      {metric === 'wind' && direction && <span className="evo-direction" title={`${t.windDirection}: ${direction}`}>{direction}{degrees !== null && <ArrowUp size={13} aria-hidden="true" style={{ transform: `rotate(${degrees + 180}deg)` }} />}</span>}
+                    </td>
+                  })}
+                </tr>)}</tbody>
+              </table>
+            </div>
+          </details>
+        )}
+
+      </div>
     </main>
   )
 }

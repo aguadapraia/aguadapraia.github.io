@@ -38,4 +38,14 @@ describe('map metric helpers', () => {
     expect(isPreferredMetricValue(4, 8, 'wind')).toBe(true)
     expect(isPreferredMetricValue(10, 8, 'wind')).toBe(false)
   })
+
+  it('keeps missing metrics out of cluster comparisons and numeric labels', () => {
+    for (const metric of ['water', 'air', 'wind'] as const) {
+      expect(mapMetricValue(undefined, metric)).toBeNaN()
+      expect(formatMapMetricValue(Number.NaN, metric, 'kmh')).toBe('—')
+      expect(isPreferredMetricValue(10, Number.NaN, metric)).toBe(true)
+      expect(isPreferredMetricValue(Number.NaN, 10, metric)).toBe(false)
+      expect(isPreferredMetricValue(Number.NaN, Number.NaN, metric)).toBe(false)
+    }
+  })
 })

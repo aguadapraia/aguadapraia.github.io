@@ -327,6 +327,7 @@ const evolutionBeachHistoriesSchema: z.ZodType<EvolutionBeachHistoriesData> =
 
 const hourlyReadingSchema: z.ZodType<HourlyBeachReading> = z.object({
   hour: z.number().int().min(0).max(23),
+  airTemperatureCelsius: z.number().nullable().default(null),
   waterTemperatureCelsius: z.number().nullable(),
   windKnots: z.number().nullable(),
   windDirection: z.string().min(1).nullable(),
@@ -353,6 +354,7 @@ const beachDayDetailSchema: z.ZodType<BeachDayDetail> = z.object({
   air: beachDayAirSchema.nullable(),
   summary: beachDaySummarySchema.nullable(),
   hourly: z.array(hourlyReadingSchema),
+  hourlyTimeZone: z.literal('UTC').optional(),
 })
 
 const dayDetailCache = new Map<string, DayDetailCacheEntry>()
@@ -655,18 +657,6 @@ export async function loadBeachDayDetail(
   return request
 }
 
-export function resolveDateIndex(
-  allDates: readonly string[],
-  today: string,
-  rangeEnd: string,
-): number {
-  const todayIdx = allDates.indexOf(today)
-  if (todayIdx >= 0) return todayIdx
-  const endIdx = allDates.indexOf(rangeEnd)
-  if (endIdx >= 0) return endIdx
-  return Math.max(0, allDates.length - 1)
-}
-
 export async function loadBeachDataset(): Promise<BeachDataset> {
   const [latestResponse, metadataResponse] = await Promise.all([
     fetch(dataUrl('latest.json'), { cache: 'default' }),
@@ -691,27 +681,4 @@ export async function loadBeachDataset(): Promise<BeachDataset> {
     districtWeather: districtWeatherFromPayload(payload),
     unavailableLocations: payload.unavailableLocations.map(({ beach }) => beach),
   }
-}
-
-export async function loadBackgroundHistory(
-  dataset: BeachDataset,
-): Promise<BeachDataset> {
-  const index = await loadTimelineIndex()
-  return { ...dataset, historyDates: index.dates }
-}
-
-export function evolutionDefaultRange(
-  historyDates: readonly string[],
-  forecastDates: readonly string[],
-): { startDate: string; endDate: string } {
-  const startDate =
-    historyDates.length >= 15
-      ? (historyDates[historyDates.length - 15] ?? '')
-      : (historyDates[0] ?? forecastDates[0] ?? '')
-  const endDate =
-    forecastDates[forecastDates.length - 1] ??
-    forecastDates[0] ??
-    historyDates[historyDates.length - 1] ??
-    startDate
-  return { startDate, endDate }
 }

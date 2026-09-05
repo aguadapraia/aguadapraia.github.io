@@ -76,6 +76,12 @@ describe('settings', () => {
       mapMetric: 'air',
       territory: 'mainland',
     })
+
+  })
+
+  it('persists the wind map without discarding other preferences', () => {
+    saveSettings({ ...loadSettings(), mapMetric: 'wind' })
+    expect(loadSettings().mapMetric).toBe('wind')
   })
 
   it('ignores invalid stored data and returns defaults', () => {

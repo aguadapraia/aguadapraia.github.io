@@ -1,0 +1,100 @@
+.svg-map-shell .district-weather-hit {
+  fill: transparent;
+}
+
+.svg-map-shell .svg-map-tooltip {
+  pointer-events: none;
+}
+
+.svg-map-shell .svg-map-controls button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.svg-map-shell .svg-beach-cluster.selected .cluster-dot,
+.svg-map-shell .svg-beach-cluster:focus-visible .cluster-dot {
+  stroke-width: 3.5;
+}
+
+.svg-map-shell .map-cluster-picker {
+  position: absolute;
+  z-index: 6;
+  top: 12px;
+  left: 12px;
+  width: min(320px, calc(100% - 24px));
+  max-height: calc(100% - 72px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--cp-border-strong);
+  border-radius: 12px;
+  background: var(--cp-panel-strong);
+  color: var(--cp-text);
+  box-shadow: var(--cp-shadow);
+}
+
+.svg-map-shell .map-cluster-picker header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-left: 12px;
+  flex-shrink: 0;
+}
+
+.svg-map-shell .map-cluster-picker button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.svg-map-shell .map-cluster-picker button:hover,
+.svg-map-shell .map-cluster-picker button[aria-pressed='true'] {
+  background: var(--cp-bg-elevated);
+}
+
+.svg-map-shell .map-cluster-picker button:focus-visible {
+  outline: 2px solid var(--cp-link);
+  outline-offset: -3px;
+}
+
+.svg-map-shell .map-cluster-picker ul {
+  margin: 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+.svg-map-shell .map-cluster-picker li + li {
+  border-top: 1px solid var(--cp-border);
+}
+
+.svg-map-shell .map-cluster-picker li button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+
+.svg-map-shell .map-cluster-picker li span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+
+.svg-map-shell .map-cluster-picker li b {
+  white-space: nowrap;
+}
+
+.svg-map-shell .map-cluster-picker small {
+  color: var(--cp-text-muted);
+}

@@ -1,0 +1,4 @@
+.metric-history-chart .metric-history-empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; text-align: center; color: var(--cp-text-muted); font-size: 12px; }
+.metric-history-chart .chart-series-legend { gap: 2px 4px; }
+.metric-history-chart .chart-series-legend button { padding: 3px 6px; min-height: 28px; }
+.metric-history-chart .chart-tooltip > strong, .metric-history-chart .chart-tooltip > small { display: block; }

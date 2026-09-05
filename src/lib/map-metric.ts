@@ -12,9 +12,10 @@ export function windColourClass(knots: number): MetricColourClass {
 }
 
 export function mapMetricValue(
-  forecast: DailyBeachForecast,
+  forecast: DailyBeachForecast | undefined,
   metric: MapMetric,
 ): number {
+  if (!forecast) return Number.NaN
   if (metric === 'air') return forecast.airMax
   if (metric === 'wind') return forecast.windAverageKnots
   return forecast.waterMax
@@ -25,6 +26,8 @@ export function isPreferredMetricValue(
   current: number,
   metric: MapMetric,
 ): boolean {
+  if (!Number.isFinite(candidate)) return false
+  if (!Number.isFinite(current)) return true
   return metric === 'wind' ? candidate < current : candidate > current
 }
 
@@ -33,6 +36,7 @@ export function formatMapMetricValue(
   metric: MapMetric,
   windUnit: WindUnit,
 ): string {
+  if (!Number.isFinite(value)) return '—'
   if (metric === 'wind') {
     return `${convertWind(value, windUnit).toFixed(1)} ${windUnit === 'kmh' ? 'km/h' : 'kn'}`
   }

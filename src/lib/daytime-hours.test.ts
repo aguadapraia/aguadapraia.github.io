@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { daytimeReadings } from './daytime-hours'
+import { daytimeReadings, hasHourlyAir } from './daytime-hours'
 
 describe('daytimeReadings', () => {
   it('keeps the inclusive 08:00-18:00 window', () => {
@@ -28,5 +28,14 @@ describe('daytimeReadings', () => {
         },
       ]),
     ).toHaveLength(1)
+  })
+
+  it('recognizes real hourly air without inventing legacy or missing readings', () => {
+    const reading = { hour: 8, waterTemperatureCelsius: null, windKnots: null, windDirection: null }
+    expect(hasHourlyAir([{ ...reading, airTemperatureCelsius: 0 }])).toBe(true)
+    for (const airTemperatureCelsius of [null, undefined, NaN, Infinity]) {
+      expect(hasHourlyAir([{ ...reading, airTemperatureCelsius }])).toBe(false)
+    }
+    expect(hasHourlyAir([{ ...reading, hour: 7, airTemperatureCelsius: 20 }])).toBe(false)
   })
 })

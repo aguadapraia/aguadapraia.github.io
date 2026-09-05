@@ -1,88 +1,64 @@
+import { geoMercator } from 'd3-geo'
 import { zoomIdentity } from 'd3-zoom'
 import { describe, expect, it } from 'vitest'
 import {
   adaptiveClusterRadius,
   clusterZoomLevel,
   initialMapTransform,
-  mapHeight,
-  mapWidth,
-  territoryClusterProfile,
+  reframeMapTransform,
 } from './map-transform'
 
 describe('initialMapTransform', () => {
-  it('returns zoomIdentity for desktop', () => {
-    expect(initialMapTransform(false)).toEqual(zoomIdentity)
+  it('does not crop geometry already fitted to its viewport', () => {
+    expect(initialMapTransform()).toEqual(zoomIdentity)
+  })
+})
+
+describe('reframeMapTransform', () => {
+  const previousSize = { width: 900, height: 680 }
+  const size = { width: 360, height: 760 }
+  const previousProjection = geoMercator().scale(3000).translate([450, 340])
+  const projection = geoMercator().scale(4800).translate([180, 380])
+
+  it('keeps a reset map fitted rather than introducing a resize pan', () => {
+    expect(reframeMapTransform(zoomIdentity, previousProjection, projection, previousSize, size)).toEqual(zoomIdentity)
   })
 
-  it('returns 1.35x zoom centered on viewport for mobile', () => {
-    const t = initialMapTransform(true)
-    expect(t.k).toBeCloseTo(1.35, 5)
-    expect(t.x).toBeCloseTo((mapWidth / 2) * (1 - 1.35), 4)
-    expect(t.y).toBeCloseTo((mapHeight / 2) * (1 - 1.35), 4)
-  })
+  it.each([1, 4, 16])('preserves the geographic centre and relative zoom at %sx', (scale) => {
+    const old = zoomIdentity.translate(-200, 120).scale(scale)
+    const center = previousProjection.invert!(old.invert([450, 340]))!
+    const next = reframeMapTransform(old, previousProjection, projection, previousSize, size)
+    const positioned = next.apply(projection(center)!)
+    expect(positioned[0]).toBeCloseTo(size.width / 2, 7)
+    expect(positioned[1]).toBeCloseTo(size.height / 2, 7)
+    expect(next.k).toBe(scale)
 
-  it('mobile transform x/y are within translateExtent bounds', () => {
-    const t = initialMapTransform(true)
-    expect(t.x).toBeGreaterThanOrEqual(-mapWidth * 0.35)
-    expect(t.y).toBeGreaterThanOrEqual(-mapHeight * 0.35)
+    const restored = reframeMapTransform(next, projection, previousProjection, size, previousSize)
+    expect(restored.x).toBeCloseTo(old.x, 7)
+    expect(restored.y).toBeCloseTo(old.y, 7)
   })
 })
 
 describe('clusterZoomLevel', () => {
-  it('does not count the responsive initial scale as user zoom', () => {
-    expect(clusterZoomLevel(1.35, 1.35, 6, 1.65)).toBe(6)
+  it('does not count the initial scale as user zoom', () => {
+    expect(clusterZoomLevel(1, 1, 6, 1.65)).toBe(6)
   })
 
-  it('reveals one additional cluster level per zoom button click', () => {
-    const initialScale = 1.35
-    expect(clusterZoomLevel(initialScale * 1.45, initialScale, 6, 1.65)).toBe(7)
-    expect(clusterZoomLevel(initialScale * 1.45 ** 2, initialScale, 6, 1.65)).toBe(8)
-    expect(clusterZoomLevel(initialScale * 1.45 ** 3, initialScale, 6, 1.65)).toBe(9)
+  it('reveals another level per zoom button click', () => {
+    expect(clusterZoomLevel(1.45, 1, 6, 1.65)).toBe(7)
+    expect(clusterZoomLevel(1.45 ** 2, 1, 6, 1.65)).toBe(8)
+    expect(clusterZoomLevel(1.45 ** 3, 1, 6, 1.65)).toBe(9)
   })
 })
 
 describe('adaptiveClusterRadius', () => {
-  it('keeps the base radius at reset and grows through the first zoom clicks', () => {
-    const initialScale = 1.35
-    expect(adaptiveClusterRadius(18, initialScale, initialScale)).toBe(18)
-    expect(adaptiveClusterRadius(18, initialScale * 1.45, initialScale)).toBe(22)
-    expect(adaptiveClusterRadius(18, initialScale * 1.45 ** 2, initialScale)).toBe(34)
-    expect(adaptiveClusterRadius(18, initialScale * 1.45 ** 3, initialScale)).toBe(50)
-    expect(adaptiveClusterRadius(18, initialScale * 1.45 ** 5, initialScale)).toBe(50)
+  it('uses bounded pixel spacing without growing clusters as the user zooms in', () => {
+    expect(adaptiveClusterRadius(18, 1, 1)).toBe(32)
+    expect(adaptiveClusterRadius(36, 1, 1)).toBe(36)
+    expect(adaptiveClusterRadius(36, 2, 1)).toBe(34)
+    expect(adaptiveClusterRadius(36, 4, 1)).toBe(32)
+    expect(adaptiveClusterRadius(100, 1, 1)).toBe(44)
+    expect(adaptiveClusterRadius(18, 16, 1)).toBe(32)
   })
 
-  describe('territoryClusterProfile', () => {
-    it('leaves single-territory views unchanged', () => {
-      expect(territoryClusterProfile('mainland', 'mainland', 0)).toEqual({
-        radiusMultiplier: 1,
-        zoomOffset: 0,
-      })
-    })
-
-    it('groups the mainland and expands islands sooner in the all view', () => {
-      expect(territoryClusterProfile('all', 'mainland', 0)).toEqual({
-        radiusMultiplier: 2,
-        zoomOffset: -1,
-      })
-      expect(territoryClusterProfile('all', 'madeira', 0)).toEqual({
-        radiusMultiplier: 0.65,
-        zoomOffset: 1,
-      })
-      expect(territoryClusterProfile('all', 'azores', 1)).toEqual({
-        radiusMultiplier: 0.75,
-        zoomOffset: 1,
-      })
-    })
-
-    it('converges toward the normal profile at later zoom', () => {
-      expect(territoryClusterProfile('all', 'mainland', 3)).toEqual({
-        radiusMultiplier: 1.1,
-        zoomOffset: 0,
-      })
-      expect(territoryClusterProfile('all', 'madeira', 3)).toEqual({
-        radiusMultiplier: 1,
-        zoomOffset: 0,
-      })
-    })
-  })
 })

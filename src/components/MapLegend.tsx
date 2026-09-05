@@ -17,9 +17,9 @@ export default function MapLegend({ language, metric, windUnit }: MapLegendProps
     const unit = windUnit === 'kmh' ? 'km/h' : 'kn'
     return (
       <div className="water-temperature-legend map-legend map-legend--wind" aria-label={copy.windScale}>
-        <span>0</span>
+        <span>{language === 'pt' ? 'Fraco' : 'Light'} · 0</span>
         <i className="legend-scale" />
-        <span>{maximumLabel}</span>
+        <span>{maximumLabel} · {language === 'pt' ? 'Forte' : 'Strong'}</span>
         <b>{unit} {copy.wind}</b>
       </div>
     )

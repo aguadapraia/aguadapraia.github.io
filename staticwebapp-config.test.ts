@@ -69,4 +69,9 @@ describe('staticwebapp.config.json', () => {
     expect(typeof globalHeaders['Referrer-Policy']).toBe('string')
     expect(globalHeaders['Referrer-Policy'].length).toBeGreaterThan(0)
   })
+
+  it('allows first-party optional geolocation while denying camera and microphone', () => {
+    const { globalHeaders } = readConfig() as { globalHeaders: Record<string, string> }
+    expect(globalHeaders['Permissions-Policy']).toBe('camera=(), microphone=(), geolocation=(self)')
+  })
 })

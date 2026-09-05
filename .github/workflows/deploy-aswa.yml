@@ -14,7 +14,6 @@ concurrency:
 
 jobs:
   build-and-deploy:
-    if: vars.COSMOS_DATA_SEEDED == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -31,6 +30,7 @@ jobs:
 
       - name: Validate frontend
         run: |
+          npm audit --include=dev --audit-level=low
           npm test
           npm run lint
 

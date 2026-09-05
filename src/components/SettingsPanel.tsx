@@ -1,10 +1,10 @@
 import {
-  Droplets,
   Languages,
   Moon,
   Settings,
   Sun,
   Wind,
+  X,
   type LucideIcon,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -68,12 +68,22 @@ export default function SettingsPanel({ settings, onSettingsChange, isMobile = f
     onSettingsChange({ ...settings, [key]: value })
   }
 
-  function close() { setOpen(false) }
+  function close() { setOpen(false); triggerRef.current?.focus() }
 
   useEffect(() => {
     if (!open) return
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { close(); triggerRef.current?.focus() }
+      if (e.key === 'Escape') { e.preventDefault(); close() }
+      if (e.key === 'Tab') {
+        const buttons = panelRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')
+        const first = buttons?.[0]
+        const last = buttons?.[buttons.length - 1]
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault(); last?.focus()
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault(); first?.focus()
+        }
+      }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -127,6 +137,9 @@ export default function SettingsPanel({ settings, onSettingsChange, isMobile = f
               >
                 {settings.theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
               </button>
+              <button type="button" className="sp-theme" aria-label={copy.close} onClick={close}>
+                <X size={16} />
+              </button>
             </div>
 
             <SegmentRow
@@ -151,18 +164,6 @@ export default function SettingsPanel({ settings, onSettingsChange, isMobile = f
               ]}
               onChange={(value) =>
                 set('windUnit', value as AppSettings['windUnit'])
-              }
-            />
-            <SegmentRow
-              label={copy.mapMetric}
-              icon={Droplets}
-              value={settings.mapMetric}
-              options={[
-                { value: 'water', label: copy.water },
-                { value: 'air', label: copy.air },
-              ]}
-              onChange={(value) =>
-                set('mapMetric', value as AppSettings['mapMetric'])
               }
             />
           </div>

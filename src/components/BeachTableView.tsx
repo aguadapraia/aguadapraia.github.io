@@ -1,17 +1,22 @@
-import { Fragment, useId, useMemo, useRef, useState } from 'react'
-import { Droplets, Map, Search, ThermometerSun, Wind, X } from 'lucide-react'
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ChevronDown, Droplets, History, Map, Search, ThermometerSun, Wind, X } from 'lucide-react'
 import { getCopy, type Language } from '../i18n'
-import { formatDistance, formatWind, type WindUnit } from '../lib/units'
+import { convertWind, formatDistance, type WindUnit } from '../lib/units'
 import {
   defaultSortState,
   filterBeaches,
+  getTableForecast,
+  hasTableValue,
+  reconcileLocationFilters,
   sortBeaches,
   toggleSort,
   type SortKey,
   type TableSortState,
 } from '../lib/beach-table'
 import { Button } from './ui/button'
+import BeachDayHours from './BeachDayHours'
 import type { BeachViewModel } from '../types'
+import './beach-table.css'
 
 interface BeachTableViewProps {
   beaches: BeachViewModel[]
@@ -19,37 +24,74 @@ interface BeachTableViewProps {
   language: Language
   windUnit: WindUnit
   onSelect: (beach: BeachViewModel) => void
+  onExploreHistory?: (beach: BeachViewModel) => void
+  forecastControl?: ReactNode
+  territoryControl?: ReactNode
 }
 
-function getForecast(beach: BeachViewModel, date: string) {
-  return beach.daily.find((f) => f.date === date) ?? beach.daily[0]!
-}
-
-function fmtHour(h: number | null, utc = false): string {
-  if (h === null) return '—'
-  return `${String(h).padStart(2, '0')}:00${utc ? ' UTC' : ''}`
-}
-
-const MOBILE_SORT_KEYS: Array<{ value: `${SortKey}:${'asc' | 'desc'}`; labelKey: keyof ReturnType<typeof getCopy> }> = [
-  { value: 'name:asc', labelKey: 'nameAsc' },
-  { value: 'name:desc', labelKey: 'nameDesc' },
-  { value: 'district:asc', labelKey: 'districtAsc' },
-  { value: 'municipality:asc', labelKey: 'municipalityAsc' },
-  { value: 'waterMin:asc', labelKey: 'waterMinAsc' },
-  { value: 'waterMax:desc', labelKey: 'waterMaxDesc' },
-  { value: 'airMin:asc', labelKey: 'airMinAsc' },
-  { value: 'airMax:desc', labelKey: 'airMaxDesc' },
-  { value: 'windAvg:asc', labelKey: 'windAvgAsc' },
-  { value: 'windAvg:desc', labelKey: 'windAvgDesc' },
-]
-
-function SortArrow({ active, dir }: { active: boolean; dir: 'asc' | 'desc' }) {
-  if (!active) return <span className="th-sort-icon th-sort-icon--idle" aria-hidden="true">⇅</span>
-  return (
-    <span className={`th-sort-icon th-sort-icon--${dir}`} aria-hidden="true">
-      {dir === 'asc' ? '▲' : '▼'}
-    </span>
-  )
+const TABLE_COPY = {
+  pt: {
+    searchPlaceholder: 'Pesquisar por praia, distrito ou concelho',
+    allDistricts: 'Todos os distritos',
+    allMunicipalities: 'Todos os concelhos',
+    noDate: 'Data indisponível',
+    count: (shown: number, total: number) => shown === total ? `${total} praias` : `${shown} / ${total} praias`,
+    water: 'Água',
+    air: 'Ar',
+    wind: 'Vento',
+    min: 'Mín.',
+    max: 'Máx.',
+    average: 'Média',
+    airStation: 'Estação da previsão do ar',
+    ascending: 'crescente',
+    descending: 'decrescente',
+    sortBy: 'Ordenar por',
+    sortLabels: {
+      name: 'Praia', district: 'Distrito', municipality: 'Concelho',
+      waterMin: 'Água mínima', waterMax: 'Água máxima',
+      airMin: 'Ar mínimo', airMax: 'Ar máximo', windAvg: 'Vento médio',
+    },
+    expand: 'Ver detalhes de',
+    collapse: 'Fechar detalhes de',
+    map: 'Ver no mapa',
+    history: 'Ver histórico',
+    missing: 'Sem dados para esta data',
+    noResults: 'Nenhuma praia corresponde aos filtros',
+    noResultsHint: 'Experimenta outro nome ou limpa os filtros.',
+    noBeaches: 'Sem praias disponíveis',
+    noBeachesHint: 'Tenta novamente mais tarde.',
+  },
+  en: {
+    searchPlaceholder: 'Search by beach, district or municipality',
+    allDistricts: 'All districts',
+    allMunicipalities: 'All municipalities',
+    noDate: 'Date unavailable',
+    count: (shown: number, total: number) => shown === total ? `${total} beaches` : `${shown} / ${total} beaches`,
+    water: 'Water',
+    air: 'Air',
+    wind: 'Wind',
+    min: 'Min.',
+    max: 'Max.',
+    average: 'Average',
+    airStation: 'Air forecast station',
+    ascending: 'ascending',
+    descending: 'descending',
+    sortBy: 'Sort by',
+    sortLabels: {
+      name: 'Beach', district: 'District', municipality: 'Municipality',
+      waterMin: 'Minimum water', waterMax: 'Maximum water',
+      airMin: 'Minimum air', airMax: 'Maximum air', windAvg: 'Average wind',
+    },
+    expand: 'Show details for',
+    collapse: 'Hide details for',
+    map: 'View on map',
+    history: 'View history',
+    missing: 'No data for this date',
+    noResults: 'No beaches match your filters',
+    noResultsHint: 'Try another name or clear the filters.',
+    noBeaches: 'No beaches available',
+    noBeachesHint: 'Please try again later.',
+  },
 }
 
 export default function BeachTableView({
@@ -58,333 +100,223 @@ export default function BeachTableView({
   language,
   windUnit,
   onSelect,
+  onExploreHistory,
+  forecastControl,
+  territoryControl,
 }: BeachTableViewProps) {
   const uid = useId()
   const [query, setQuery] = useState('')
-  const [district, setDistrict] = useState('')
-  const [municipality, setMunicipality] = useState('')
+  const [location, setLocation] = useState({ district: '', municipality: '' })
   const [sort, setSort] = useState<TableSortState>(defaultSortState())
   const [expandedId, setExpandedId] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
   const copy = getCopy(language)
+  const text = TABLE_COPY[language]
+  const locale = language === 'pt' ? 'pt-PT' : 'en-GB'
+  const windSuffix = windUnit === 'kmh' ? 'km/h' : 'kn'
+  const { district, municipality } = reconcileLocationFilters(beaches, location)
+
+  useEffect(() => {
+    if (location.district !== district || location.municipality !== municipality) {
+      setLocation({ district, municipality })
+    }
+  }, [location, district, municipality])
 
   const districts = useMemo(
-    () => [...new Set(beaches.map((b) => b.district))].sort(),
-    [beaches],
+    () => [...new Set(beaches.map((beach) => beach.district))].sort((a, b) => a.localeCompare(b, locale)),
+    [beaches, locale],
   )
   const municipalities = useMemo(
-    () =>
-      [...new Set(beaches.filter((b) => !district || b.district === district).map((b) => b.municipality))].sort(),
-    [beaches, district],
+    () => [...new Set(beaches.filter((beach) => !district || beach.district === district).map((beach) => beach.municipality))]
+      .sort((a, b) => a.localeCompare(b, locale)),
+    [beaches, district, locale],
   )
+  const sorted = useMemo(() => {
+    const filtered = filterBeaches(beaches, {
+      query, district, municipality, language,
+    })
+    return sortBeaches(filtered, sort, activeDate, language)
+  }, [beaches, query, district, municipality, language, activeDate, sort])
 
-  const filtered = useMemo(
-    () => filterBeaches(beaches, { query, district, municipality, language }),
-    [beaches, query, district, municipality, language],
-  )
-
-  const sorted = useMemo(
-    () => sortBeaches(filtered, sort, activeDate, language),
-    [filtered, sort, activeDate, language],
-  )
+  const singleResultId = sorted.length === 1 ? sorted[0].id : ''
+  useEffect(() => {
+    if (singleResultId) setExpandedId(singleResultId)
+  }, [singleResultId, query])
 
   const hasFilters = Boolean(query || district || municipality)
-
-  function handleSortClick(key: SortKey) {
-    setSort((prev) => toggleSort(prev, key))
-  }
+  const formattedDate = activeDate
+    ? new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
+      .format(new Date(`${activeDate}T12:00:00Z`))
+    : text.noDate
+  const reading = (value: number | undefined, unit: string, decimals = 1) => hasTableValue(value)
+    ? <span className="beach-table-reading">{value.toLocaleString(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}<span className="beach-table-unit"> {unit}</span></span>
+    : <span className="beach-table-missing-value" aria-label={text.missing} title={text.missing}>—</span>
+  const temperature = (value: number | undefined, decimals = 1) => reading(value, '°C', decimals)
+  const wind = (value: number | undefined) => reading(hasTableValue(value) ? convertWind(value, windUnit) : undefined, windSuffix)
 
   function clearAll() {
     setQuery('')
-    setDistrict('')
-    setMunicipality('')
+    setLocation({ district: '', municipality: '' })
     searchRef.current?.focus()
   }
 
-  function ariaSort(key: SortKey): 'ascending' | 'descending' | 'none' {
-    if (sort.key !== key) return 'none'
-    return sort.dir === 'asc' ? 'ascending' : 'descending'
+  function sortHeading(key: SortKey, label: string, detail?: string) {
+    const next = toggleSort(sort, key)
+    const Icon = key.startsWith('water') ? Droplets : key.startsWith('air') ? ThermometerSun : key === 'windAvg' ? Wind : null
+    return (
+      <button
+        type="button"
+        className="beach-table-sort-heading"
+        onClick={() => setSort(next)}
+        aria-label={`${text.sortBy} ${text.sortLabels[key]} (${next.dir === 'asc' ? text.ascending : text.descending})`}
+      >
+        <span><span className="beach-table-heading-label">{Icon && <Icon size={14} aria-hidden="true" />}{label}</span>{detail && <small>{detail}</small>}</span>
+        <span className={sort.key === key ? 'beach-table-sort-arrow is-active' : 'beach-table-sort-arrow'} aria-hidden="true">
+          {sort.key === key ? (sort.dir === 'asc' ? '↑' : '↓') : '↕'}
+        </span>
+      </button>
+    )
   }
 
-  const mobileSortValue = `${sort.key}:${sort.dir}` as `${SortKey}:${'asc' | 'desc'}`
+  function ariaSort(key: SortKey): 'ascending' | 'descending' | 'none' {
+    return sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
+  }
 
   return (
-    <main className="btv-root" id="app-content">
-      <div className="btv-toolbar" role="toolbar" aria-label={copy.beachList}>
-        <div className="btv-count">
-          <strong>{copy.beachList}</strong>
-          <span>{sorted.length} {copy.results}</span>
+    <main className="btv-root beach-table" id="app-content" tabIndex={-1} aria-label={copy.beachList}>
+      <section className="beach-table-results" aria-label={copy.beachList}>
+        <div className="beach-table-toolbar">
+          <div className="beach-table-search">
+            <Search size={18} aria-hidden="true" />
+            <input
+              id={`${uid}-search`}
+              type="search"
+              ref={searchRef}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={text.searchPlaceholder}
+              aria-label={text.searchPlaceholder}
+            />
+            {query && (
+              <button type="button" aria-label={copy.clear} onClick={() => { setQuery(''); searchRef.current?.focus() }}>
+                <X size={18} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+          {territoryControl && <div className="beach-table-territory">{territoryControl}</div>}
+          <label className="beach-table-field">
+            <span className="sr-only">{copy.district}</span>
+            <select value={district} onChange={(event) => setLocation({ district: event.target.value, municipality: '' })}>
+              <option value="">{text.allDistricts}</option>
+              {districts.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </label>
+          <label className="beach-table-field">
+            <span className="sr-only">{copy.municipality}</span>
+            <select value={municipality} onChange={(event) => setLocation({ district, municipality: event.target.value })}>
+              <option value="">{text.allMunicipalities}</option>
+              {municipalities.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          </label>
+          <span className="beach-table-count" role="status" aria-live="polite" aria-atomic="true">{text.count(sorted.length, beaches.length)}</span>
+          {hasFilters && <button type="button" className="beach-table-reset" onClick={clearAll} aria-label={copy.clearFilters} title={copy.clearFilters}><X size={17} aria-hidden="true" /></button>}
+          {forecastControl && <div className="beach-table-forecast">{forecastControl}</div>}
         </div>
 
-        <label className="btv-search-label">
-          <Search size={15} aria-hidden="true" />
-          <input
-            ref={searchRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={copy.search}
-            aria-label={copy.search}
-          />
-          {query && (
-            <button type="button" aria-label={copy.clear} className="btv-search-clear" onClick={() => setQuery('')}>
-              <X size={13} />
-            </button>
-          )}
-        </label>
-
-        <label className="btv-filter-label">
-          <span className="btv-filter-name">{copy.district}</span>
-          <select
-            value={district}
-            onChange={(e) => { setDistrict(e.target.value); setMunicipality('') }}
-            aria-label={copy.district}
-          >
-            <option value="">{copy.all}</option>
-            {districts.map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
-        </label>
-
-        <label className="btv-filter-label">
-          <span className="btv-filter-name">{copy.municipality}</span>
-          <select
-            value={municipality}
-            onChange={(e) => setMunicipality(e.target.value)}
-            aria-label={copy.municipality}
-          >
-            <option value="">{copy.all}</option>
-            {municipalities.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </label>
-
-        {hasFilters && (
-          <button type="button" className="btv-clear-btn" onClick={clearAll}>
-            <X size={13} />
-            <span>{copy.clearFilters}</span>
-          </button>
+        {sorted.length === 0 ? (
+          <div className="beach-table-empty">
+            <Search size={28} aria-hidden="true" />
+            <h3>{beaches.length ? text.noResults : text.noBeaches}</h3>
+            <p>{beaches.length ? text.noResultsHint : text.noBeachesHint}</p>
+            {hasFilters && <Button onClick={clearAll}>{copy.clearFilters}</Button>}
+          </div>
+        ) : (
+          <div className="beach-table-scroll" tabIndex={0} role="region" aria-label={`${copy.beachList} · ${formattedDate}`}>
+            <table className="beach-table-table">
+              <caption className="sr-only">{copy.beachList} · {formattedDate}</caption>
+              <thead>
+                <tr>
+                  <th scope="col" className="beach-table-name-col" aria-sort={ariaSort('name')}>{sortHeading('name', copy.beach)}</th>
+                  <th scope="col" className="beach-table-location-col" aria-sort={ariaSort('district')}>{sortHeading('district', copy.district)}</th>
+                  <th scope="col" className="beach-table-location-col" aria-sort={ariaSort('municipality')}>{sortHeading('municipality', copy.municipality)}</th>
+                  <th scope="col" className="beach-table-num beach-table-min-col beach-table-water-col" aria-sort={ariaSort('waterMin')}>{sortHeading('waterMin', text.water, `${text.min} °C`)}</th>
+                  <th scope="col" className="beach-table-num beach-table-water-col" aria-sort={ariaSort('waterMax')}>{sortHeading('waterMax', text.water, `${text.max} °C`)}</th>
+                  <th scope="col" className="beach-table-num beach-table-min-col beach-table-air-col" aria-sort={ariaSort('airMin')}>{sortHeading('airMin', text.air, `${text.min} °C`)}</th>
+                  <th scope="col" className="beach-table-num beach-table-air-col" aria-sort={ariaSort('airMax')}>{sortHeading('airMax', text.air, `${text.max} °C`)}</th>
+                  <th scope="col" className="beach-table-num beach-table-wind-col" aria-sort={ariaSort('windAvg')}>{sortHeading('windAvg', text.wind, `${text.average} ${windSuffix}`)}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((beach) => {
+                  const forecast = getTableForecast(beach, activeDate)
+                  const expanded = expandedId === beach.id
+                  const detailId = `${uid}-detail-${beach.id}`
+                  const toggleId = `${uid}-toggle-${beach.id}`
+                  return (
+                    <Fragment key={beach.id}>
+                      <tr className={`beach-table-row${expanded ? ' is-expanded' : ''}`}>
+                        <th scope="row" className="beach-table-name-cell">
+                          <button
+                            id={toggleId}
+                            type="button"
+                            className="beach-table-name-button"
+                            aria-label={`${expanded ? text.collapse : text.expand} ${beach.name}`}
+                            aria-expanded={expanded}
+                            aria-controls={expanded ? detailId : undefined}
+                            onClick={() => setExpandedId(expanded ? '' : beach.id)}
+                          >
+                            <ChevronDown size={17} aria-hidden="true" />
+                            <span><strong>{beach.name}</strong><small>{beach.municipality} · {beach.district}</small></span>
+                          </button>
+                        </th>
+                        <td className="beach-table-location-col">{beach.district}</td>
+                        <td className="beach-table-location-col">{beach.municipality}</td>
+                        <td className="beach-table-num beach-table-min-col beach-table-water-col">{temperature(forecast?.waterMin)}</td>
+                        <td className="beach-table-num beach-table-water-col"><strong>{temperature(forecast?.waterMax)}</strong></td>
+                        <td className="beach-table-num beach-table-min-col beach-table-air-col">{temperature(forecast?.airMin, 0)}</td>
+                        <td className="beach-table-num beach-table-air-col">{temperature(forecast?.airMax, 0)}</td>
+                        <td className="beach-table-num beach-table-wind-col">{wind(forecast?.windAverageKnots)}</td>
+                      </tr>
+                      {expanded && (
+                        <tr className="beach-table-detail-row">
+                          <td colSpan={8}>
+                            <section id={detailId} className="beach-table-detail" aria-labelledby={toggleId}>
+                              <div className="beach-table-detail-head">
+                                <time dateTime={activeDate || undefined}>{formattedDate}</time>
+                                <div className="beach-table-actions">
+                                  {onExploreHistory && <Button variant="outline" onClick={() => onExploreHistory(beach)}><History size={16} aria-hidden="true" />{text.history}</Button>}
+                                  <Button variant="outline" onClick={() => onSelect(beach)}><Map size={16} aria-hidden="true" />{text.map}</Button>
+                                </div>
+                              </div>
+                              {!forecast && <p className="beach-table-missing">{text.missing}</p>}
+                              {forecast?.airLocation && (
+                                <p className="beach-table-source">
+                                  {text.airStation}: {forecast.airLocation}
+                                  {hasTableValue(forecast.airDistanceKm) && ` · ${formatDistance(forecast.airDistanceKm)}`}
+                                </p>
+                              )}
+                              {activeDate && (
+                                <BeachDayHours
+                                  key={`${beach.id}/${activeDate}`}
+                                  beachId={beach.id}
+                                  date={activeDate}
+                                  language={language}
+                                  windUnit={windUnit}
+                                  layout="compact"
+                                />
+                              )}
+                            </section>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
-
-        <label className="btv-mobile-sort">
-          <span className="btv-filter-name">{copy.orderBy}</span>
-          <select
-            value={mobileSortValue}
-            onChange={(e) => {
-              const [key, dir] = e.target.value.split(':') as [SortKey, 'asc' | 'desc']
-              setSort({ key, dir })
-            }}
-          >
-            {MOBILE_SORT_KEYS.map(({ value, labelKey }) => (
-              <option key={value} value={value}>
-                {String(copy[labelKey])}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <div className="btv-scroll">
-        <table className="btv-table">
-          <thead>
-            <tr>
-              <th scope="col" aria-sort={ariaSort('name')}>
-                <button type="button" className="th-sort-btn" onClick={() => handleSortClick('name')}>
-                  {copy.beach}
-                  <SortArrow active={sort.key === 'name'} dir={sort.dir} />
-                </button>
-              </th>
-              <th scope="col" className="btv-col-district" aria-sort={ariaSort('district')}>
-                <button type="button" className="th-sort-btn" onClick={() => handleSortClick('district')}>
-                  {copy.district}
-                  <SortArrow active={sort.key === 'district'} dir={sort.dir} />
-                </button>
-              </th>
-              <th scope="col" className="btv-col-municipality" aria-sort={ariaSort('municipality')}>
-                <button type="button" className="th-sort-btn" onClick={() => handleSortClick('municipality')}>
-                  {copy.municipality}
-                  <SortArrow active={sort.key === 'municipality'} dir={sort.dir} />
-                </button>
-              </th>
-              <th scope="col" className="btv-col-num btv-col-hide-mobile" aria-sort={ariaSort('waterMin')}>
-                <button type="button" className="th-sort-btn" onClick={() => handleSortClick('waterMin')}>
-                  {copy.waterMin}
-                  <SortArrow active={sort.key === 'waterMin'} dir={sort.dir} />
-                </button>
-              </th>
-              <th scope="col" className="btv-col-num btv-col-water-max" aria-sort={ariaSort('waterMax')}>
-                <button type="button" className="th-sort-btn" onClick={() => handleSortClick('waterMax')}>
-                  {copy.waterMax}
-                  <SortArrow active={sort.key === 'waterMax'} dir={sort.dir} />
-                </button>
-              </th>
-              <th scope="col" className="btv-col-num btv-col-hide-mobile" aria-sort={ariaSort('airMin')}>
-                <button type="button" className="th-sort-btn" onClick={() => handleSortClick('airMin')}>
-                  {copy.airMin}
-                  <SortArrow active={sort.key === 'airMin'} dir={sort.dir} />
-                </button>
-              </th>
-              <th scope="col" className="btv-col-num btv-col-air-max" aria-sort={ariaSort('airMax')}>
-                <button type="button" className="th-sort-btn" onClick={() => handleSortClick('airMax')}>
-                  {copy.airMax}
-                  <SortArrow active={sort.key === 'airMax'} dir={sort.dir} />
-                </button>
-              </th>
-              <th scope="col" className="btv-col-num btv-col-wind-avg" aria-sort={ariaSort('windAvg')}>
-                <button type="button" className="th-sort-btn" onClick={() => handleSortClick('windAvg')}>
-                  {copy.windAverage}
-                  <SortArrow active={sort.key === 'windAvg'} dir={sort.dir} />
-                </button>
-              </th>
-              <th scope="col" className="btv-col-expand">
-                <span className="sr-only">{copy.details}</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((beach) => {
-              const fc = getForecast(beach, activeDate)
-              const expanded = expandedId === beach.id
-              const detailId = `${uid}detail${beach.id}`
-              const toggleBtnId = `${uid}toggle${beach.id}`
-
-              return (
-                <Fragment key={beach.id}>
-                  <tr
-                    className={expanded ? 'btv-row btv-row--expanded' : 'btv-row'}
-                    onClick={() => setExpandedId((c) => (c === beach.id ? '' : beach.id))}
-                  >
-                    <td className="btv-cell-name">
-                      <button
-                        id={toggleBtnId}
-                        type="button"
-                        className="btv-name-btn"
-                        aria-expanded={expanded}
-                        aria-controls={detailId}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setExpandedId((c) => (c === beach.id ? '' : beach.id))
-                        }}
-                      >
-                        <strong>{beach.name}</strong>
-                        <small className="btv-location-hint">{beach.district} · {beach.municipality}</small>
-                      </button>
-                    </td>
-                    <td className="btv-col-district">{beach.district}</td>
-                    <td className="btv-col-municipality">{beach.municipality}</td>
-                    <td className="btv-col-num btv-col-hide-mobile">
-                      {fc.waterMin.toFixed(1)} °C
-                    </td>
-                    <td className="btv-col-num btv-col-water-max">
-                      <span className="btv-mobile-label"><Droplets size={10} />MAX</span>
-                      <strong>{fc.waterMax.toFixed(1)} °C</strong>
-                    </td>
-                    <td className="btv-col-num btv-col-hide-mobile">
-                      {fc.airMin.toFixed(0)} °C
-                    </td>
-                    <td className="btv-col-num btv-col-air-max">
-                      <span className="btv-mobile-label"><ThermometerSun size={10} />MAX</span>
-                      <strong>{fc.airMax.toFixed(0)} °C</strong>
-                    </td>
-                    <td className="btv-col-num btv-col-wind-avg">
-                      <span className="btv-mobile-label"><Wind size={10} />AVG</span>
-                      {formatWind(fc.windAverageKnots, windUnit)}
-                    </td>
-                    <td className="btv-col-expand" aria-hidden="true">
-                      <span className={expanded ? 'btv-chevron btv-chevron--open' : 'btv-chevron'}>›</span>
-                    </td>
-                  </tr>
-                  {expanded && (
-                    <tr
-                      id={detailId}
-                      role="row"
-                      className="btv-detail-row"
-                      aria-labelledby={toggleBtnId}
-                    >
-                      <td colSpan={9} className="btv-detail-cell">
-                        <div className="btv-detail-card">
-                          <div className="btv-detail-head">
-                            <div>
-                              <strong>{beach.name}</strong>
-                              <span>{beach.district} › {beach.municipality}</span>
-                            </div>
-                            <Button
-                              type="button"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                onSelect(beach)
-                              }}
-                            >
-                              <Map size={13} />
-                              {language === 'pt' ? 'Ver no mapa' : 'View on map'}
-                            </Button>
-                          </div>
-                          <div className="btv-detail-metrics">
-                            <article className="btv-metric-card">
-                              <header className="btv-metric-header">
-                                <Droplets size={13} />
-                                {copy.waterTemperature}
-                              </header>
-                              <div className="btv-metric-row">
-                                <span className="btv-metric-label">MIN</span>
-                                <strong>{fc.waterMin.toFixed(1)} °C</strong>
-                                <span className="btv-metric-hour">{fmtHour(fc.waterMinHour)}</span>
-                              </div>
-                              <div className="btv-metric-row">
-                                <span className="btv-metric-label">MAX</span>
-                                <strong>{fc.waterMax.toFixed(1)} °C</strong>
-                                <span className="btv-metric-hour">{fmtHour(fc.waterMaxHour)}</span>
-                              </div>
-                            </article>
-                            <article className="btv-metric-card">
-                              <header className="btv-metric-header">
-                                <ThermometerSun size={13} />
-                                {copy.airTemperature}
-                              </header>
-                              <div className="btv-metric-row">
-                                <span className="btv-metric-label">MIN</span>
-                                <strong>{fc.airMin.toFixed(0)} °C</strong>
-                                <span className="btv-metric-hour">{fmtHour(fc.airMinHour, true)}</span>
-                              </div>
-                              <div className="btv-metric-row">
-                                <span className="btv-metric-label">MAX</span>
-                                <strong>{fc.airMax.toFixed(0)} °C</strong>
-                                <span className="btv-metric-hour">{fmtHour(fc.airMaxHour, true)}</span>
-                              </div>
-                              <p className="btv-source-line">
-                                {copy.source} {fc.airLocation} · {formatDistance(fc.airDistanceKm)}
-                              </p>
-                            </article>
-                            <article className="btv-metric-card">
-                              <header className="btv-metric-header">
-                                <Wind size={13} />
-                                {copy.windAverage}
-                              </header>
-                              <div className="btv-metric-row">
-                                <span className="btv-metric-label">MIN</span>
-                                <strong>{formatWind(fc.windMinKnots, windUnit)}</strong>
-                                <span className="btv-metric-hour">{fmtHour(fc.windMinHour)}</span>
-                              </div>
-                              <div className="btv-metric-row">
-                                <span className="btv-metric-label">AVG</span>
-                                <strong>{formatWind(fc.windAverageKnots, windUnit)}</strong>
-                                <span className="btv-metric-hour">09–18h</span>
-                              </div>
-                              <div className="btv-metric-row">
-                                <span className="btv-metric-label">MAX</span>
-                                <strong>{formatWind(fc.windMaxKnots, windUnit)}</strong>
-                                <span className="btv-metric-hour">{fmtHour(fc.windMaxHour)}</span>
-                              </div>
-                            </article>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+      </section>
     </main>
   )
 }

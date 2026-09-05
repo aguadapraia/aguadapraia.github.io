@@ -1,407 +1,149 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Droplets, ThermometerSun, Wind } from 'lucide-react'
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import { useMemo, useState, type CSSProperties } from 'react'
+import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { getCopy, type Language } from '../i18n'
-import { beachColor } from '../lib/beach-palette'
-import { shortBeachName } from '../lib/beach-name'
-import { resetHiddenSeries, toggleSeriesKey } from '../lib/chart-legend'
-import { bridgeForecastSeries } from '../lib/chart-series'
+import {
+  chartLineReadings, chartLineStatistics, chartReadingRange, DEFAULT_CHART_VISIBILITY,
+  visibleChartReadings, visibleChartStatistics, type ChartReadings, type ChartStatistic,
+} from '../lib/chart-visibility'
+import { resolveEvolutionPeriod } from '../lib/evolution-period'
 import { convertWind, type WindUnit } from '../lib/units'
-import type { BeachViewModel, DailyBeachForecast, HistoryPoint } from '../types'
-import ChartLegend from './ChartLegend'
-import ChartTooltip from './ChartTooltip'
+import type { DailyBeachForecast, HistoryPoint, MapMetric } from '../types'
+import ChartSeriesLegend from './ChartSeriesLegend'
+import './metric-history-chart.css'
 
-type Metric = 'water' | 'air' | 'wind'
+interface ChartPoint extends ChartReadings {
+  date: string
+  kind?: 'history' | 'forecast'
+  [key: string]: string | number | number[] | undefined
+}
 
-interface MetricHistoryChartProps {
+function finite(value: number | undefined) {
+  return value !== undefined && Number.isFinite(value) ? value : undefined
+}
+
+export default function MetricHistoryChart({
+  history, forecasts, language, windUnit, metric,
+}: {
   history: HistoryPoint[]
   forecasts: DailyBeachForecast[]
   language: Language
   windUnit: WindUnit
-  compareHistories?: {
-    beach: BeachViewModel
-    history: HistoryPoint[]
-    displayName?: string
-  }[]
-  recentCount?: number
-  controlledMetric?: Metric
-  hideTabs?: boolean
-  primaryBeach?: BeachViewModel
-  primaryDisplayName?: string
-}
-
-interface ChartPoint {
-  date: string
-  label: string
-  historyMin?: number
-  historyAverage?: number
-  historyMax?: number
-  forecastMin?: number
-  forecastAverage?: number
-  forecastMax?: number
-  [key: string]: string | number | undefined
-}
-
-interface RawChartPoint {
-  date: string
-  historyMin?: number
-  historyAverage?: number
-  historyMax?: number
-  forecastMin?: number
-  forecastAverage?: number
-  forecastMax?: number
-  [key: string]: string | number | undefined
-}
-
-interface DotProps {
-  cx?: number
-  cy?: number
-  index?: number
-  key?: string | number | bigint | null
-}
-
-const colours = ['var(--cp-link)', 'var(--cp-accent)', 'var(--cp-orange)'] as const
-
-function formatDateLabel(date: string, language: Language): string {
-  return new Intl.DateTimeFormat(language === 'pt' ? 'pt-PT' : 'en-GB', {
-    day: '2-digit',
-    month: 'short',
-  }).format(new Date(`${date}T12:00:00Z`))
-}
-
-function historyValue(
-  point: HistoryPoint,
-  metric: Metric,
-  windUnit: WindUnit,
-): number | undefined {
-  if (metric === 'water') return point.waterMax
-  if (metric === 'air') return point.airMax
-  return point.windMaxKnots === undefined
-    ? undefined
-    : convertWind(point.windMaxKnots, windUnit)
-}
-
-function comparisonValue(
-  point: HistoryPoint,
-  metric: Metric,
-  windUnit: WindUnit,
-): number | undefined {
-  if (metric !== 'wind') return historyValue(point, metric, windUnit)
-  return point.windAverageKnots === undefined
-    ? undefined
-    : convertWind(point.windAverageKnots, windUnit)
-}
-
-function hiddenDefaults(metric: Metric): Set<string> {
-  return metric === 'wind'
-    ? new Set(['Min', 'Max'])
-    : new Set(['Min'])
-}
-
-function paddedDomain(values: readonly number[], padding: number): [number, number] {
-  if (values.length === 0) return [0, 1]
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  if (min === max) return [min - padding, max + padding]
-  return [Math.floor(min - padding), Math.ceil(max + padding)]
-}
-
-function recentHistoryDot(colour: string, visibleFromIndex: number) {
-  return function HistoryDot({ cx, cy, index, key }: DotProps) {
-    const safeIndex = index ?? -1
-    const dotKey = String(key ?? `dot-${colour}-${safeIndex}`)
-    if (safeIndex < visibleFromIndex || cx === undefined || cy === undefined) {
-      return <g key={dotKey} />
-    }
-    return <circle key={dotKey} cx={cx} cy={cy} r={2} fill={colour} />
-  }
-}
-
-function numericChartValues(point: ChartPoint): number[] {
-  const values: number[] = []
-  for (const value of Object.values(point)) {
-    if (typeof value === 'number') values.push(value)
-  }
-  return values
-}
-
-export default function MetricHistoryChart({
-  history,
-  forecasts,
-  language,
-  windUnit,
-  compareHistories = [],
-  recentCount = 15,
-  controlledMetric,
-  hideTabs = false,
-  primaryBeach,
-  primaryDisplayName,
-}: MetricHistoryChartProps) {
+  metric: MapMetric
+}) {
   const copy = getCopy(language)
-  const [metric, setMetric] = useState<Metric>('water')
-  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(
-    () => hiddenDefaults('water'),
-  )
-  const activeMetric = controlledMetric ?? metric
-
-  useEffect(() => {
-    if (controlledMetric) setMetric(controlledMetric)
-  }, [controlledMetric])
-
+  const locale = language === 'pt' ? 'pt-PT' : 'en-GB'
+  const suffix = metric === 'wind' ? windUnit === 'kmh' ? 'km/h' : 'kn' : '°C'
+  const colour = `var(--metric-${metric})`
+  const [visibility, setVisibility] = useState(DEFAULT_CHART_VISIBILITY)
+  const statistics = useMemo<ChartStatistic[]>(() => metric === 'wind' ? ['max', 'min', 'avg'] : ['max', 'min'], [metric])
+  const enabledStatistics = visibleChartStatistics(visibility, statistics)
+  const rawData = useMemo(() => {
+    const points = new Map<string, ChartPoint>()
+    const readWind = (value: number | undefined) => value === undefined ? undefined : convertWind(value, windUnit)
+    function add(point: HistoryPoint | DailyBeachForecast, kind: 'history' | 'forecast') {
+      const min = finite(metric === 'water' ? point.waterMin : metric === 'air' ? point.airMin : readWind(point.windMinKnots))
+      const max = finite(metric === 'water' ? point.waterMax : metric === 'air' ? point.airMax : readWind(point.windMaxKnots))
+      const avg = metric === 'wind' ? finite(readWind(point.windAverageKnots)) : undefined
+      points.set(point.date, { date: point.date, min, max, avg, kind })
+    }
+    history.filter((point) => point.kind === 'history').forEach((point) => add(point, 'history'))
+    forecasts.forEach((point) => add(point, 'forecast'))
+    const dates = [...points.keys()].sort()
+    const period = resolveEvolutionPeriod(dates[0] ?? '', dates.at(-1) ?? '', dates)
+    if (!period) return []
+    return period.calendarDates.map<ChartPoint>((date) => points.get(date) ?? { date })
+  }, [history, forecasts, metric, windUnit])
   const data = useMemo(() => {
-    const points = new Map<string, RawChartPoint>()
-
-    for (const point of history) {
-      if (point.kind !== 'history') continue
-      points.set(point.date, {
-        ...(points.get(point.date) ?? { date: point.date }),
-        historyMin:
-          activeMetric === 'water'
-            ? point.waterMin
-            : activeMetric === 'air'
-              ? point.airMin
-              : point.windMinKnots === undefined
-                ? undefined
-                : convertWind(point.windMinKnots, windUnit),
-        historyAverage:
-          activeMetric === 'wind' && point.windAverageKnots !== undefined
-            ? convertWind(point.windAverageKnots, windUnit)
-            : undefined,
-        historyMax: historyValue(point, activeMetric, windUnit),
-      })
-    }
-
-    for (const forecast of forecasts) {
-      points.set(forecast.date, {
-        ...(points.get(forecast.date) ?? { date: forecast.date }),
-        forecastMin:
-          activeMetric === 'water'
-            ? forecast.waterMin
-            : activeMetric === 'air'
-              ? forecast.airMin
-              : convertWind(forecast.windMinKnots, windUnit),
-        forecastAverage:
-          activeMetric === 'wind'
-            ? convertWind(forecast.windAverageKnots, windUnit)
-            : undefined,
-        forecastMax:
-          activeMetric === 'water'
-            ? forecast.waterMax
-            : activeMetric === 'air'
-              ? forecast.airMax
-              : convertWind(forecast.windMaxKnots, windUnit),
-      })
-    }
-
-    compareHistories.slice(0, 3).forEach((comparison, index) => {
-      comparison.history.forEach((point) => {
-        const value = comparisonValue(point, activeMetric, windUnit)
-        if (value === undefined) return
-        points.set(point.date, {
-          ...(points.get(point.date) ?? { date: point.date }),
-          [`compare${index}`]: value,
-        })
-      })
+    const lineStatistics = chartLineStatistics(visibility, statistics)
+    const projected = rawData.map<ChartPoint>((point) => {
+      if (!point.kind) return { date: point.date }
+      const readings = visibleChartReadings(point, visibility, statistics, point.kind)
+      const row: ChartPoint = { date: point.date, kind: point.kind, ...readings }
+      row[`${point.kind}_range`] = chartReadingRange(readings)
+      return row
     })
-
-    const sorted = [...points.values()]
-      .sort((first, second) => first.date.localeCompare(second.date))
-      .map((point) => ({
-        ...point,
-        label: formatDateLabel(point.date, language),
-      }))
-
-    return bridgeForecastSeries(sorted, [
-      { historyKey: 'historyMin', forecastKey: 'forecastMin' },
-      { historyKey: 'historyAverage', forecastKey: 'forecastAverage' },
-      { historyKey: 'historyMax', forecastKey: 'forecastMax' },
-    ])
-  }, [activeMetric, compareHistories, forecasts, history, language, windUnit])
-
-  const comparisonFocus = hideTabs && primaryBeach !== undefined
-  const series = useMemo(
-    () =>
-      comparisonFocus
-        ? [
-            {
-              key: activeMetric === 'wind' ? 'Average' : 'Max',
-              label: primaryDisplayName ?? shortBeachName(primaryBeach.name),
-              fullLabel: primaryBeach.name,
-              colour: beachColor(0),
-            },
-          ]
-        : [
-            { key: 'Min', label: copy.minimum, colour: colours[0] },
-            ...(activeMetric === 'wind'
-              ? [{ key: 'Average', label: copy.average, colour: colours[1] }]
-              : []),
-            {
-              key: 'Max',
-              label: copy.maximum,
-              colour: activeMetric === 'wind' ? colours[2] : colours[1],
-            },
-          ],
-    [
-      activeMetric,
-      comparisonFocus,
-      copy.average,
-      copy.maximum,
-      copy.minimum,
-      primaryBeach,
-      primaryDisplayName,
-    ],
-  )
-  const comparisonSeries = useMemo(
-    () =>
-      compareHistories.slice(0, 3).map((comparison, index) => ({
-        key: `compare${index}`,
-        label:
-          comparison.displayName ?? shortBeachName(comparison.beach.name),
-        fullLabel: comparison.beach.name,
-        colour: beachColor(index + 1),
-      })),
-    [compareHistories],
-  )
-  const legendSeries = useMemo(
-    () => [...series, ...comparisonSeries],
-    [comparisonSeries, series],
-  )
-  const legendKeys = useMemo(
-    () => legendSeries.map((item) => item.key),
-    [legendSeries],
-  )
-
-  useEffect(() => {
-    setHiddenSeries(hiddenDefaults(activeMetric))
-  }, [activeMetric])
-
-  useEffect(() => {
-    setHiddenSeries((current) => {
-      const next = resetHiddenSeries(current, legendKeys)
-      const unchanged =
-        next.size === current.size && [...next].every((key) => current.has(key))
-      return unchanged ? current : next
+    projected.forEach((point, index) => {
+      if (!point.kind) return
+      const rangeKey = `${point.kind}_range`
+      const adjacentRange = Array.isArray(projected[index - 1]?.[rangeKey]) || Array.isArray(projected[index + 1]?.[rangeKey])
+      const readings = chartLineReadings(point, lineStatistics, adjacentRange)
+      for (const statistic of statistics) point[`${point.kind}_${statistic}_line`] = readings[statistic]
     })
-  }, [legendKeys])
-
-  const values = data.flatMap(numericChartValues)
-  const domain = paddedDomain(values, activeMetric === 'wind' ? 2 : 1)
-  const suffix = activeMetric === 'wind'
-    ? ` ${windUnit === 'kmh' ? 'km/h' : 'kn'}`
-    : ' °C'
-  const recentStartIndex = Math.max(0, data.length - recentCount)
+    // The calendar includes empty days, so only adjacent publications can join.
+    projected.forEach((point, index) => {
+      const previous = projected[index - 1]
+      if (point.kind !== 'forecast' || previous?.kind !== 'history') return
+      for (const statistic of statistics) {
+        if (typeof point[`forecast_${statistic}_line`] === 'number' && typeof previous[`history_${statistic}_line`] === 'number') {
+          previous[`forecast_${statistic}_line`] = previous[`history_${statistic}_line`]
+        }
+      }
+    })
+    return projected
+  }, [rawData, statistics, visibility])
+  const values = data.flatMap((point) => enabledStatistics
+    .map((statistic) => point[statistic]).filter((value): value is number => value !== undefined))
+  const padding = metric === 'wind' ? 2 : 1
+  const low = values.length ? Math.floor(values.reduce((min, value) => Math.min(min, value), Infinity) - padding) : 0
+  const high = values.length ? Math.ceil(values.reduce((max, value) => Math.max(max, value), -Infinity) + padding) : 1
+  const kinds = (['history', 'forecast'] as const).filter((kind) => kind === 'history' || visibility.forecast)
+  const showForecast = rawData.some((point) => point.kind === 'forecast')
+  const hidden = !enabledStatistics.length || (!visibility.forecast && !rawData.some((point) => point.kind === 'history'))
+  const labels = { max: copy.maximum, min: copy.minimum, avg: copy.average, value: '' }
+  const help = language === 'pt'
+    ? 'Ativa ou oculta séries. A faixa só aparece com Mín. e Máx. ativos. O arquivo guarda previsões, não medições.'
+    : 'Show or hide series. The band requires both Min. and Max. Archives contain forecasts, not measurements.'
+  const dateLabel = (date: string, full = false) => new Intl.DateTimeFormat(locale, {
+    day: 'numeric', month: 'short', ...(full ? { year: 'numeric' } : {}),
+  }).format(new Date(`${date}T12:00:00Z`))
 
   return (
-    <div className={`metric-chart${hideTabs ? ' metric-chart--tabs-hidden' : ''}`}>
-      {!hideTabs && (
-        <div className="metric-chart-tabs seg-control" role="tablist" aria-label={copy.mapMetric}>
-          {([
-            ['water', copy.water, <Droplets key="water-icon" size={14} />],
-            ['air', copy.air, <ThermometerSun key="air-icon" size={14} />],
-            ['wind', copy.wind, <Wind key="wind-icon" size={14} />],
-          ] as const).map(([value, label, icon]) => (
-            <button
-              key={value}
-              type="button"
-              role="tab"
-              aria-selected={activeMetric === value}
-              className={`metric-tab metric-tab--${value}`}
-              onClick={() => setMetric(value)}
-            >
-              {icon}
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="metric-chart-canvas">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 6, right: 8, bottom: 0, left: -12 }}>
-            <CartesianGrid stroke="var(--cp-border)" vertical={false} />
-            <XAxis
-              dataKey="label"
-              axisLine={false}
-              tickLine={false}
-              minTickGap={20}
-              tick={{ fill: 'var(--cp-text-muted)', fontSize: 10 }}
-            />
-            <YAxis
-              domain={domain}
-              axisLine={false}
-              tickLine={false}
-              tick={{ fill: 'var(--cp-text-muted)', fontSize: 10 }}
-              width={44}
-              tickFormatter={(value) => `${value}${activeMetric === 'wind' ? '' : '°'}`}
-            />
-            <Tooltip
-              content={(props) => (
-                <ChartTooltip
-                  {...props}
-                  suffix={suffix}
-                  seriesLabels={Object.fromEntries(
-                    legendSeries.map(({ key, label }) => [key, label]),
-                  )}
-                />
-              )}
-            />
-            {series
-              .filter(({ key }) => !hiddenSeries.has(key))
-              .flatMap(({ key, label, colour }) => [
-                <Line
-                  key={`history${key}`}
-                  connectNulls={false}
-                  dataKey={`history${key}`}
-                  name={`${copy.historyLabel} · ${label}`}
-                  stroke={colour}
-                  strokeWidth={key === 'Max' ? 2.4 : 2}
-                  dot={recentHistoryDot(colour, recentStartIndex)}
-                  activeDot={{ r: 4 }}
-                />,
-                <Line
-                  key={`forecast${key}`}
-                  connectNulls={false}
-                  dataKey={`forecast${key}`}
-                  name={`${copy.forecastLabel} · ${label}`}
-                  stroke={colour}
-                  strokeWidth={key === 'Max' ? 2.4 : 2}
-                  strokeDasharray="6 5"
-                  dot={{ r: 2, fill: colour }}
-                  activeDot={{ r: 4 }}
-                />,
-              ])}
-            {comparisonSeries
-              .filter(({ key }) => !hiddenSeries.has(key))
-              .map(({ key, label, colour }) => (
-                <Line
-                  key={key}
-                  connectNulls={false}
-                  dataKey={key}
-                  name={label}
-                  stroke={colour}
-                  strokeWidth={2.2}
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                />
-              ))}
-          </LineChart>
-        </ResponsiveContainer>
+    <div className="beach-history-chart metric-history-chart" style={{ '--chart-colour': colour } as CSSProperties}>
+      <div className="beach-history-canvas" role="img" aria-label={`${copy.history}: ${copy[metric]}`}>
+        {values.length ? <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart accessibilityLayer data={data} margin={{ top: 10, right: 8, bottom: 0, left: -12 }}>
+            <CartesianGrid stroke="var(--cp-border)" vertical={false} strokeDasharray="3 5" />
+            <XAxis dataKey="date" axisLine={false} tickLine={false} minTickGap={32}
+              tickFormatter={(date: string) => dateLabel(date)} tick={{ fill: 'var(--cp-text-muted)', fontSize: 11 }} />
+            <YAxis domain={[metric === 'wind' ? Math.max(0, low) : low, high]} width={42}
+              axisLine={false} tickLine={false} tickCount={4} tick={{ fill: 'var(--cp-text-muted)', fontSize: 11 }} />
+            <Tooltip content={({ active, payload, label }) => {
+              if (!active || !payload?.length) return null
+              const point: ChartPoint = payload[0].payload
+              if (!point.kind || (point.kind === 'forecast' && !visibility.forecast)) return null
+              const readings = visibleChartReadings(point, visibility, statistics, point.kind)
+              return <div className="chart-tooltip">
+                <strong>{dateLabel(String(label), true)}</strong>
+                <small>{point.kind === 'forecast' ? copy.forecast : copy.historyLabel}</small>
+                {enabledStatistics.map((statistic) => <span key={statistic}>{labels[statistic]}
+                  <b>{readings[statistic] === undefined ? '—' : `${readings[statistic].toFixed(1)} ${suffix}`}</b>
+                </span>)}
+              </div>
+            }} />
+            {visibility.min && visibility.max && kinds.map((kind) => <Area key={`${kind}-range`} dataKey={`${kind}_range`}
+              type="linear" connectNulls={false} stroke="none" fill={colour} fillOpacity={kind === 'history' ? 0.13 : 0.06}
+              activeDot={false} isAnimationActive={false} />)}
+            {enabledStatistics.flatMap((statistic) => kinds.map((kind) => {
+              const key = `${kind}_${statistic}_line`
+              return <Line key={key} dataKey={key} type="linear" connectNulls={false} stroke={colour}
+                strokeWidth={statistic === 'min' ? 1.6 : 2.3} strokeDasharray={kind === 'forecast' ? '5 4' : statistic === 'min' ? '2 3' : undefined}
+                dot={(props) => {
+                  const index = props.index ?? 0
+                  const isolated = typeof data[index - 1]?.[key] !== 'number' && typeof data[index + 1]?.[key] !== 'number'
+                  return isolated && typeof data[index]?.[key] === 'number'
+                    ? <circle key={`${key}-${index}`} cx={props.cx} cy={props.cy} r={2.5} fill={colour} strokeWidth={0} />
+                    : <g key={`${key}-${index}`} />
+                }} activeDot={{ r: 4, fill: colour }} isAnimationActive={false} />
+            }))}
+          </ComposedChart>
+        </ResponsiveContainer> : <div className="metric-history-empty" role="status">
+          {hidden
+            ? language === 'pt' ? 'Ativa uma série na legenda.' : 'Enable a series in the legend.'
+            : language === 'pt' ? 'Sem valores para estas séries.' : 'No values for these series.'}
+        </div>}
       </div>
-      <ChartLegend
-        series={legendSeries}
-        hidden={hiddenSeries}
-        ariaLabel={copy.toggleSeriesVisibility}
-        onToggle={(key) =>
-          setHiddenSeries((current) => toggleSeriesKey(current, key))
-        }
-      />
+      <ChartSeriesLegend language={language} visibility={visibility} statistics={statistics} showForecast={showForecast}
+        help={help} onToggle={(key) => setVisibility((value) => ({ ...value, [key]: !value[key] }))} />
     </div>
   )
 }

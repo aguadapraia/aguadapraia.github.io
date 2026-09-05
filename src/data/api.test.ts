@@ -1,16 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   dataUrl,
-  evolutionDefaultRange,
   loadEvolutionBeachHistories,
   loadEvolutionDate,
   loadEvolutionSummary,
-  loadBackgroundHistory,
+  loadTimelineIndex,
   loadBeachDataset,
   loadBeachDayDetail,
   resetDayDetailCache,
   resetEvolutionIndexCache,
-  resolveDateIndex,
 } from './api'
 
 afterEach(() => {
@@ -170,7 +168,7 @@ describe('published data loading', () => {
     ).toBe(false)
   })
 
-  it('loadBackgroundHistory loads only the bounded date index', async () => {
+  it('loads the bounded date index separately without bulk history', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
       if (url === '/data/latest.json') return new Response(JSON.stringify(latestPayload()))
@@ -188,18 +186,9 @@ describe('published data loading', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const initial = await loadBeachDataset()
-    const hydrated = await loadBackgroundHistory(initial)
-
-    expect(hydrated.historyDates).toEqual(['2026-07-24', '2026-07-25'])
-    expect(hydrated.beaches[0].history.map((point) => point.date)).toEqual([
-      '2026-07-26',
-      '2026-07-27',
-      '2026-07-28',
-    ])
-    expect(fetchMock.mock.calls.map(([input]) => String(input))).not.toContain(
-      '/data/timeline/2026-07.json',
-    )
+    const index = await loadTimelineIndex()
+    expect(index.dates).toEqual(['2026-07-24', '2026-07-25'])
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(['/data/evolution/index.json'])
   })
 
   it('rejects invalid published timestamps and empty display windows', async () => {
@@ -261,11 +250,33 @@ describe('beach day detail loading', () => {
     await expect(loadBeachDayDetail('10', '2026-07-29')).resolves.toMatchObject({
       beachId: '10',
       date: '2026-07-29',
-      hourly: [{ hour: 9, windDirection: 'NW' }],
+      hourly: [{ hour: 9, windDirection: 'NW', airTemperatureCelsius: null }],
     })
     expect(fetchMock).toHaveBeenCalledWith('/data/beach/10/day/2026-07-29.json', {
       cache: 'default',
     })
+  })
+
+  it('accepts additive UTC air readings and preserves genuine hourly gaps', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      schemaVersion: 1, beachId: '10', date: '2026-07-29', updatedAt: '2026-07-29T08:00:00.000Z',
+      hourlyTimeZone: 'UTC', air: { minimumCelsius: 18, maximumCelsius: 27 }, summary: null,
+      hourly: [20, null, 0].map((airTemperatureCelsius, index) => ({
+        hour: 8 + index, airTemperatureCelsius, waterTemperatureCelsius: null, windKnots: null, windDirection: null,
+      })),
+    }))))
+    const detail = await loadBeachDayDetail('10', '2026-07-29')
+    expect(detail.hourlyTimeZone).toBe('UTC')
+    expect(detail.hourly.map((reading) => reading.airTemperatureCelsius)).toEqual([20, null, 0])
+  })
+
+  it('rejects malformed hourly air rather than silently converting values', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      schemaVersion: 1, beachId: '10', date: '2026-07-29', updatedAt: '2026-07-29T08:00:00.000Z',
+      air: null, summary: null,
+      hourly: [{ hour: 8, airTemperatureCelsius: '20', waterTemperatureCelsius: null, windKnots: null, windDirection: null }],
+    }))))
+    await expect(loadBeachDayDetail('10', '2026-07-29')).rejects.toThrow()
   })
 
   it('throws on non-ok response with beach id, date, and status', async () => {
@@ -461,29 +472,6 @@ describe('bounded evolution loading', () => {
   })
 })
 
-describe('evolutionDefaultRange', () => {
-  it('returns correct defaults with fewer than 15 dates', () => {
-    expect(
-      evolutionDefaultRange(['2026-07-25', '2026-07-26'], ['2026-07-28', '2026-07-29']),
-    ).toEqual({
-      startDate: '2026-07-25',
-      endDate: '2026-07-29',
-    })
-  })
-
-  it('returns 15th-from-end date when plenty of history', () => {
-    const dates = Array.from({ length: 20 }, (_, index) =>
-      `2026-07-${String(index + 1).padStart(2, '0')}`,
-    )
-    expect(
-      evolutionDefaultRange(dates, ['2026-07-21', '2026-07-22', '2026-07-23']),
-    ).toEqual({
-      startDate: '2026-07-06',
-      endDate: '2026-07-23',
-    })
-  })
-})
-
 describe('dataUrl', () => {
   it('falls back to public asset path when API base is not set', () => {
     expect(dataUrl('latest.json', undefined, '/')).toBe('/data/latest.json')
@@ -509,26 +497,5 @@ describe('dataUrl', () => {
 
   it('handles trailing slash in API base', () => {
     expect(dataUrl('latest.json', '/api/data/')).toBe('/api/data/latest')
-  })
-})
-
-describe('resolveDateIndex', () => {
-  it('returns today index when today is in allDates', () => {
-    const dates = ['2026-07-25', '2026-07-26', '2026-07-27', '2026-07-28']
-    expect(resolveDateIndex(dates, '2026-07-26', '2026-07-28')).toBe(1)
-  })
-
-  it('returns rangeEnd index when today is not in allDates', () => {
-    const dates = ['2026-07-24', '2026-07-25', '2026-07-28']
-    expect(resolveDateIndex(dates, '2026-07-27', '2026-07-28')).toBe(2)
-  })
-
-  it('returns last index when neither today nor rangeEnd is in allDates', () => {
-    const dates = ['2026-07-24', '2026-07-25']
-    expect(resolveDateIndex(dates, '2026-07-27', '2026-07-28')).toBe(1)
-  })
-
-  it('returns 0 for empty allDates', () => {
-    expect(resolveDateIndex([], '2026-07-27', '2026-07-28')).toBe(0)
   })
 })

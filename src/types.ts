@@ -1,8 +1,8 @@
 export type Territory = 'mainland' | 'madeira' | 'azores'
 export type TerritoryFilter = 'all' | Territory
 export type Theme = 'light' | 'dark'
-export type SettingsMapMetric = 'water' | 'air'
-export type MapMetric = SettingsMapMetric | 'wind'
+export type SettingsMapMetric = 'water' | 'air' | 'wind'
+export type MapMetric = SettingsMapMetric
 export type DateKind = 'history' | 'current' | 'forecast'
 
 export interface HistoryPoint {
@@ -20,6 +20,7 @@ export interface HistoryPoint {
 
 export interface HourlyBeachReading {
   hour: number
+  airTemperatureCelsius?: number | null
   waterTemperatureCelsius: number | null
   windKnots: number | null
   windDirection: string | null
@@ -46,6 +47,7 @@ export interface BeachDayDetail {
   air: BeachDayAir | null
   summary: BeachDaySummary | null
   hourly: HourlyBeachReading[]
+  hourlyTimeZone?: 'UTC'
 }
 
 export interface DailyBeachForecast {
