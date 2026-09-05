@@ -174,7 +174,7 @@ export default function App() {
             if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
             event.preventDefault(); setSelectedId(null); navigateToView('map')
           }}>
-          <span className="brand-mark"><BrandMark size={36} /></span><span>ÁguaDaPraia</span>
+          <span className="brand-mark"><BrandMark size={44} /></span><span>ÁguaDaPraia</span>
         </a>
         <nav className="beach-navigation" aria-label={copy.viewNavigation}>
           {navigation.map(({ view, label, icon: Icon }) => <a key={view}

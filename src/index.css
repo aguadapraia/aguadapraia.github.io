@@ -244,8 +244,9 @@ button {
 .loading-progress { display: block; width: 144px; height: 12px; overflow: hidden; color: var(--cp-link); mask-image: linear-gradient(90deg, transparent, black 15%, black 85%, transparent); }
 .loading-progress svg { display: block; max-width: none; animation: loading-progress 1.2s linear infinite; }
 .loading-indicator--compact .loading-progress { width: 96px; }
-.brand:hover .brand-wave { animation: sea-breathe .65s ease-in-out; }
-.brand:hover .brand-sun { animation: sun-breathe .65s ease-in-out; }
+.brand:is(:hover, :focus-visible, :active) .brand-wave > path { animation: brand-surf .8s ease-in-out; }
+.brand:is(:hover, :focus-visible, :active) .brand-wave > path:nth-child(2) { animation-direction: reverse; }
+.brand:is(:hover, :focus-visible, :active) .brand-sun { animation: sun-breathe .8s ease-in-out; }
 
 .loading-label {
   font-size: 0.875rem;
@@ -391,6 +392,12 @@ button {
 @keyframes sea-breathe {
   0%, 100% { transform: translate(0, 0); }
   50% { transform: translate(1px, -1px); }
+}
+@keyframes brand-surf {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(1px, -.4px); }
+  50% { transform: translate(0, .4px); }
+  75% { transform: translate(-1px, -.4px); }
 }
 @keyframes sun-breathe {
   0%, 100% { transform: translateY(0); opacity: 1; }
@@ -854,7 +861,7 @@ button {
 
 @media (prefers-reduced-motion: reduce) {
   .loading-brand .brand-wave, .loading-brand .brand-sun, .loading-progress svg,
-  .brand:hover .brand-wave, .brand:hover .brand-sun { animation: none !important; }
+  .brand .brand-wave > path, .brand:is(:hover, :focus-visible, :active) .brand-sun { animation: none !important; }
 }
 
 

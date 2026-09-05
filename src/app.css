@@ -19,7 +19,7 @@
   border-bottom: 1px solid var(--cp-border);
   background: var(--cp-surface);
 }
-.beach-app .brand { grid-area: brand; width: fit-content; gap: 8px; font-size: 17px; font-weight: 700; letter-spacing: -.5px; }
+.beach-app .brand { grid-area: brand; width: fit-content; gap: 9px; font-size: 21px; font-weight: 700; letter-spacing: -.6px; }
 .beach-app .brand > span:last-child { display: inline; }
 .beach-app .brand-mark { background: none; color: var(--cp-accent); }
 .beach-app .header-right { grid-area: settings; justify-self: end; margin: 0; gap: 8px; }
@@ -238,9 +238,9 @@
   .beach-app .beach-map-layout { grid-template-columns: 360px minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
-  .beach-app .site-header { grid-template-columns: 32px minmax(0, 1fr) 32px; grid-template-areas: 'brand navigation settings'; gap: 4px 12px; padding: 0 10px; min-height: 48px; }
+  .beach-app .site-header { grid-template-columns: 38px minmax(0, 1fr) 32px; grid-template-areas: 'brand navigation settings'; gap: 4px 12px; padding: 0 10px; min-height: 48px; }
   .beach-app .brand > span:last-child { display: none; }
-  .beach-app .brand-mark svg { width: 32px; height: 32px; }
+  .beach-app .brand-mark svg { width: 38px; height: 38px; }
   .beach-app .sp-trigger { height: 32px; width: 32px; }
   .beach-app .header-right { gap: 0; }
   .beach-navigation { justify-content: center; gap: 12px; }
