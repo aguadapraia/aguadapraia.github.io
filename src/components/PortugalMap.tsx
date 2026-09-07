@@ -78,6 +78,7 @@ interface PortugalMapProps {
   onClusterSelect?: (id: string, nearbyIds: string[], keyboard: boolean) => void
   clusterChoicesInline?: boolean
   onClearSelection: () => void
+  onReady?: () => void
 }
 
 const maxZoom = 16
@@ -158,14 +159,18 @@ function coordinateTerritory(longitude: number, latitude: number) {
 }
 
 let districtGeometry: Promise<FeatureCollection<Geometry>> | undefined
+let preparedDistrictGeometry: FeatureCollection<Geometry> | undefined
 
-function loadDistrictGeometry() {
+export function loadDistrictGeometry() {
   if (!districtGeometry) {
-    districtGeometry = fetch(publicAssetUrl('geo/districts.geojson'), { cache: 'force-cache' })
+    districtGeometry = fetch(publicAssetUrl('geo/districts.geojson'), { cache: 'force-cache', signal: AbortSignal.timeout(30_000) })
       .then((response) => {
         if (!response.ok) throw new Error('District map geometry is unavailable')
         return response.json() as Promise<FeatureCollection<Geometry>>
-      }).then(prepareDistricts).catch((error: unknown) => {
+      }).then(prepareDistricts).then((collection) => {
+        preparedDistrictGeometry = collection
+        return collection
+      }).catch((error: unknown) => {
         districtGeometry = undefined
         throw error
       })
@@ -191,6 +196,7 @@ export default function PortugalMap({
   onClusterSelect,
   clusterChoicesInline = false,
   onClearSelection,
+  onReady,
 }: PortugalMapProps) {
   const svgRef = useRef<SVGSVGElement>(null)
   const zoomBehaviorRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(
@@ -207,7 +213,7 @@ export default function PortugalMap({
   const focusClusterRef = useRef(false)
   const clusterTitleId = useId()
   const [districts, setDistricts] =
-    useState<FeatureCollection<Geometry> | null>(null)
+    useState<FeatureCollection<Geometry> | null>(preparedDistrictGeometry ?? null)
   const [mapError, setMapError] = useState<string | null>(null)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
@@ -303,6 +309,11 @@ export default function PortugalMap({
     () => (projection ? geoPath(projection) : null),
     [projection],
   )
+  useEffect(() => {
+    if (!projection || !viewport.measured || !onReady) return
+    const frame = requestAnimationFrame(onReady)
+    return () => cancelAnimationFrame(frame)
+  }, [onReady, projection, viewport.measured])
   const activeWeather = useMemo(
     () =>
       districtWeather.filter(

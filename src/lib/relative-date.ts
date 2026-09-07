@@ -6,11 +6,24 @@ interface RelativeLabel {
   compactDate: string
 }
 
+const compactDateFormats = {
+  pt: new Intl.DateTimeFormat('pt-PT', { day: '2-digit', month: 'short' }),
+  en: new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short' }),
+}
+const chartDateFormats: Partial<Record<Language, { short: Intl.DateTimeFormat; full: Intl.DateTimeFormat }>> = {}
+
 export function formatCompactDate(date: string, language: Language) {
-  return new Intl.DateTimeFormat(language === 'pt' ? 'pt-PT' : 'en-GB', {
-    day: '2-digit',
-    month: 'short',
-  }).format(new Date(`${date}T12:00:00Z`))
+  return compactDateFormats[language].format(new Date(`${date}T12:00:00Z`))
+}
+
+export function formatChartDate(date: string, language: Language, year = false) {
+  if (!date) return ''
+  const locale = language === 'pt' ? 'pt-PT' : 'en-GB'
+  const formats = chartDateFormats[language] ??= {
+    short: new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short' }),
+    full: new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', year: 'numeric' }),
+  }
+  return (year ? formats.full : formats.short).format(new Date(`${date}T12:00:00Z`))
 }
 
 function offsetDate(date: string, days: number): string {

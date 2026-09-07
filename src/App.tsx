@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { List, Map as MapIcon, TrendingUp } from 'lucide-react'
 import BeachDetails from './components/BeachDetails'
 import BrandMark from './components/BrandMark'
@@ -7,6 +7,8 @@ import MapDiscovery from './components/MapDiscovery'
 import MapLegend from './components/MapLegend'
 import SettingsPanel from './components/SettingsPanel'
 import TerritorySelect from './components/TerritorySelect'
+import PortugalMap, { loadDistrictGeometry } from './components/PortugalMap'
+import BeachTableView from './components/BeachTableView'
 import { loadBeachDataset, prepareHistory } from './data/api'
 import { getCopy } from './i18n'
 import { lisbonDate, preferredForecastDate } from './lib/date-classification'
@@ -17,10 +19,14 @@ import { canonicalUrlForView, pathForView, viewFromPath, type AppViewMode } from
 import type { BeachDataset, BeachViewModel, TerritoryFilter } from './types'
 import './app.css'
 
-const PortugalMap = lazy(() => import('./components/PortugalMap'))
-const loadHistoryView = () => import('./components/HistoryView')
-const HistoryView = lazy(loadHistoryView)
-const BeachTableView = lazy(() => import('./components/BeachTableView'))
+let historyViewRequest: Promise<typeof import('./components/HistoryView')> | undefined
+function loadHistoryView() {
+  historyViewRequest ??= import('./components/HistoryView').catch((error: unknown) => {
+    historyViewRequest = undefined
+    throw error
+  })
+  return historyViewRequest
+}
 
 function GithubMark() {
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -48,8 +54,31 @@ export default function App() {
   const historyViewport = useRef({ width: 0, height: 0 })
   const historyScroll = useRef<{ element: HTMLElement; top: number; left: number }[]>([])
   const returningFromHistory = useRef(false)
-  const [viewMode, setViewMode] = useState<AppViewMode>(() => viewFromPath(window.location.pathname))
+  const initialView = useRef(viewFromPath(window.location.pathname)).current
+  const [viewMode, setViewMode] = useState<AppViewMode>(initialView)
+  const [primaryViewReady, setPrimaryViewReady] = useState(false)
+  const markPrimaryViewReady = useCallback(() => setPrimaryViewReady(true), [])
   const [mobileLayout, setMobileLayout] = useState(() => window.matchMedia('(max-width: 760px)').matches)
+  // A prepared component can render immediately without re-entering a lazy boundary.
+  const [HistoryView, setHistoryView] = useState<typeof import('./components/HistoryView').default | null>(null)
+  const [historyCodeError, setHistoryCodeError] = useState(false)
+  const prepareView = useCallback((view: AppViewMode) => {
+    if (view === 'map') {
+      void loadDistrictGeometry().catch((error: unknown) => console.warn('Map preparation failed:', error))
+    } else if (view === 'history') {
+      setHistoryCodeError(false)
+      void loadHistoryView().then((module) => {
+        setHistoryView(() => module.default)
+      }).catch((error: unknown) => {
+        console.warn('History page preparation failed:', error)
+        setHistoryCodeError(true)
+      })
+    }
+  }, [])
+
+  useEffect(() => {
+    prepareView(initialView)
+  }, [initialView, prepareView])
 
   useEffect(() => {
     let active = true
@@ -67,26 +96,44 @@ export default function App() {
   }, [loadAttempt])
 
   useEffect(() => {
-    if (!dataset) return
+    if (!dataset || !primaryViewReady) return
     const controller = new AbortController()
+    let pending = false
     const prepare = () => {
-      if (document.visibilityState !== 'visible') return
-      void prepareHistory(territory, controller.signal)
-        .then(() => { if (!controller.signal.aborted) return loadHistoryView() })
+      if (document.visibilityState !== 'visible' || pending || controller.signal.aborted) return
+      pending = true
+      void Promise.all([
+        prepareHistory(territory, controller.signal),
+        loadDistrictGeometry(),
+        loadHistoryView().then((module) => {
+          if (!controller.signal.aborted) setHistoryView(() => module.default)
+        }),
+      ])
         .catch((error: unknown) => {
           if (!controller.signal.aborted) console.warn('Background history preparation failed:', error)
-        })
+        }).finally(() => { pending = false })
     }
-    // Let the current forecasts render first; navigation reuses these requests.
-    const timeout = window.setTimeout(prepare, 500)
-    const visible = () => { if (document.visibilityState === 'visible') prepare() }
+    // Geometry must paint before background work competes for mobile bandwidth/CPU.
+    let cancelScheduled = () => {}
+    const schedule = () => {
+      cancelScheduled()
+      if (typeof window.requestIdleCallback === 'function') {
+        const id = window.requestIdleCallback(prepare, { timeout: 1500 })
+        cancelScheduled = () => window.cancelIdleCallback(id)
+      } else {
+        const id = window.setTimeout(prepare, 300)
+        cancelScheduled = () => window.clearTimeout(id)
+      }
+    }
+    schedule()
+    const visible = () => { if (document.visibilityState === 'visible') schedule() }
     document.addEventListener('visibilitychange', visible)
     return () => {
-      window.clearTimeout(timeout)
+      cancelScheduled()
       document.removeEventListener('visibilitychange', visible)
       controller.abort()
     }
-  }, [dataset, territory])
+  }, [dataset, primaryViewReady, territory])
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -128,7 +175,10 @@ export default function App() {
     const handlePopState = () => {
       const nextView = viewFromPath(window.location.pathname)
       const origin = window.history.state?.returnView
-      if (nextView === 'history') captureHistoryOrigin()
+      if (nextView === 'history') {
+        prepareView('history')
+        captureHistoryOrigin()
+      }
       returningFromHistory.current = viewMode === 'history' && nextView === historyOrigin
       setHistoryOrigin(nextView === 'history' && (origin === 'map' || origin === 'table') ? origin : null)
       if (nextView === 'history') {
@@ -142,7 +192,7 @@ export default function App() {
     }
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
-  }, [historyOrigin, viewMode])
+  }, [historyOrigin, prepareView, viewMode])
   useEffect(() => {
     if (viewMode === 'history' || !returningFromHistory.current) return
     returningFromHistory.current = false
@@ -202,6 +252,7 @@ export default function App() {
   }
   function exploreHistory(beach?: BeachViewModel) {
     if (viewMode === 'history') return
+    prepareView('history')
     captureHistoryOrigin()
     setHistoryOrigin(viewMode)
     setHistoryBeachId(beach?.id)
@@ -271,6 +322,8 @@ export default function App() {
         <nav className="beach-navigation" aria-label={copy.viewNavigation}>
           {navigation.map(({ view, label, icon: Icon }) => <a key={view}
             href={pathForView(view)} aria-current={viewMode === view ? 'page' : undefined}
+            onPointerEnter={() => prepareView(view)} onFocus={() => prepareView(view)}
+            onPointerDown={() => prepareView(view)}
             onClick={(event) => {
               if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
               event.preventDefault()
@@ -314,8 +367,8 @@ export default function App() {
                 onExploreHistory={() => exploreHistory(selectedBeach)} />}
             </MapDiscovery>
           <div className="beach-map-canvas">
-            <Suspense fallback={<LoadingIndicator label={copy.loading} />}>
               <PortugalMap beaches={territoryBeaches}
+                onReady={markPrimaryViewReady}
                 districtWeather={dataset.districtWeather}
                 activeDate={activeDate} language={language} selectedId={selectedBeach?.id ?? ''}
                 territory={territory} theme={theme} windUnit={windUnit} mapMetric={mapMetric}
@@ -334,14 +387,13 @@ export default function App() {
                   }
                 }}
                 onClearSelection={closeBeachDetails} />
-            </Suspense>
             <MapLegend language={language} metric={mapMetric} windUnit={windUnit} />
           </div>
         </main>
       )}
       {(viewMode === 'table' || historyOrigin === 'table') && (
-        <Suspense fallback={<main className="beach-view-loading"><LoadingIndicator label={copy.loading} /></main>}>
         <BeachTableView beaches={territoryBeaches} activeDate={activeDate} language={language}
+          onReady={markPrimaryViewReady}
           suspendedSize={viewMode !== 'table' ? historyViewport.current : undefined}
           windUnit={windUnit} onSelect={(beach) => { navigateToView('map'); selectBeach(beach) }}
           onExploreHistory={exploreHistory}
@@ -353,15 +405,19 @@ export default function App() {
              return <option key={date} value={date}>{label.relative} · {label.compactDate}</option>
            })}
           </select>} />
-        </Suspense>
       )}
       {viewMode === 'history' && (
-        <Suspense fallback={<main className="beach-view-loading"><LoadingIndicator label={copy.loadingHistory} /></main>}>
-          <HistoryView key={historyBeachId ?? 'territory'} dataset={dataset} language={language}
+        HistoryView ? <HistoryView key={historyBeachId ?? 'territory'} dataset={dataset} language={language}
+            onReady={markPrimaryViewReady}
             windUnit={windUnit} theme={theme} initialTerritory={territory}
             initialMapMetric={mapMetric} initialBeachId={historyBeachId}
             onReturn={returnFromHistory} returnLabel={historyOrigin === 'table' ? copy.backToTable : copy.backToMap} />
-        </Suspense>
+          : <main id="app-content" className="beach-view-loading">
+            {historyCodeError ? <div className="beach-inline-error" role="alert">
+              <p>{copy.noHistoryAvailable}</p>
+              <button type="button" onClick={() => window.location.reload()}>{copy.retry}</button>
+            </div> : <LoadingIndicator label={copy.loadingHistory} />}
+          </main>
       )}
 
       <footer className="attribution-bar">

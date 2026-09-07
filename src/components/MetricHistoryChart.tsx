@@ -6,6 +6,7 @@ import {
   visibleChartReadings, visibleChartStatistics, type ChartReadings, type ChartStatistic,
 } from '../lib/chart-visibility'
 import { resolveHistoryPeriod } from '../lib/history-period'
+import { formatChartDate } from '../lib/relative-date'
 import { convertWind, type WindUnit } from '../lib/units'
 import type { DailyBeachForecast, HistoryPoint, MapMetric } from '../types'
 import ChartSeriesLegend from './ChartSeriesLegend'
@@ -31,7 +32,6 @@ export default function MetricHistoryChart({
   metric: MapMetric
 }) {
   const copy = getCopy(language)
-  const locale = language === 'pt' ? 'pt-PT' : 'en-GB'
   const suffix = metric === 'wind' ? windUnit === 'kmh' ? 'km/h' : 'kn' : '°C'
   const colour = `var(--metric-${metric})`
   const [visibility, setVisibility] = useState(DEFAULT_CHART_VISIBILITY)
@@ -93,9 +93,7 @@ export default function MetricHistoryChart({
   const help = language === 'pt'
     ? 'Ativa ou oculta séries. A faixa requer Mín. e Máx. O histórico contém previsões guardadas; a linha tracejada mostra as atuais.'
     : 'Show or hide series. The band requires Min. and Max. History contains saved forecasts; the dashed line shows current forecasts.'
-  const dateLabel = (date: string, full = false) => new Intl.DateTimeFormat(locale, {
-    day: 'numeric', month: 'short', ...(full ? { year: 'numeric' } : {}),
-  }).format(new Date(`${date}T12:00:00Z`))
+  const dateLabel = (date: string, full = false) => formatChartDate(date, language, full)
 
   return (
     <div className="beach-history-chart metric-history-chart" style={{ '--chart-colour': colour } as CSSProperties}>

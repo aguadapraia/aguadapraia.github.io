@@ -13,12 +13,13 @@ import type {
   TerritoryFilter,
 } from '../types'
 import { z } from 'zod'
-import { classifyDate } from '../lib/date-classification'
+import { classifyDate, lisbonDate } from '../lib/date-classification'
 import { canonicalBeachName } from '../lib/beach-name'
 import { publicAssetUrl } from '../lib/public-asset'
 import { HIGHLIGHT_SIMILARITY } from '../lib/highlight-policy'
 import { RequestCache } from '../lib/request-cache'
-import { historyRequestChunks } from '../lib/history-period'
+import { availableHistoryDates, calendarDayCount, historyRequestChunks, resolveHistoryPeriod } from '../lib/history-period'
+import { formatCompactDate } from '../lib/relative-date'
 
 function dataUrl(
   subpath: string,
@@ -405,22 +406,6 @@ const historySummaryCache = new RequestCache<HistorySummaryData>()
 const historyDateCache = new RequestCache<HistoryDateData>()
 const historyBeachCache = new RequestCache<HistoryBeachHistoriesData>()
 
-function lisbonCalendarDate(date = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Lisbon',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date)
-}
-
-function dateLabel(date: string) {
-  return new Intl.DateTimeFormat('pt-PT', {
-    day: '2-digit',
-    month: 'short',
-  }).format(new Date(`${date}T12:00:00Z`))
-}
-
 function requiredNumber(value: number | null, context: string) {
   if (value === null || !Number.isFinite(value)) {
     throw new Error(`Published beach data is missing ${context}`)
@@ -434,7 +419,7 @@ function historyPointFromDaily(
 ): HistoryPoint {
   return {
     date: forecast.date,
-    label: dateLabel(forecast.date),
+    label: formatCompactDate(forecast.date, 'pt'),
     kind: classifyDate(forecast.date, forecastDates),
     waterMin: forecast.waterMin,
     waterMax: forecast.waterMax,
@@ -452,7 +437,7 @@ export function historyPointFromTimeline(
 ): HistoryPoint {
   return {
     date: point.date,
-    label: dateLabel(point.date),
+    label: formatCompactDate(point.date, 'pt'),
     kind: classifyDate(point.date, forecastDates),
     ...(point.waterMin === undefined ? {} : { waterMin: point.waterMin }),
     ...(point.waterMax === undefined ? {} : { waterMax: point.waterMax }),
@@ -593,6 +578,33 @@ export function loadTimelineIndex(signal?: AbortSignal): Promise<TimelineIndexDa
   }, signal)
 }
 
+function historySummaryQuery(start: string, end: string, territory: TerritoryFilter, includeCandidates: boolean) {
+  return new URLSearchParams({
+    start, end, territory, records: includeCandidates ? '2' : '1',
+    temperatureTolerance: String(HIGHLIGHT_SIMILARITY.temperatureCelsius),
+    windToleranceKnots: String(HIGHLIGHT_SIMILARITY.windKnots),
+  }).toString()
+}
+
+export function getPreparedHistory(territory: TerritoryFilter) {
+  const index = timelineIndexCache.peek('index')
+  if (!index) return undefined
+  const today = lisbonDate()
+  const dates = availableHistoryDates(index.dates.filter((date) => date < today))
+  const start = dates[0] ?? ''
+  const end = dates.at(-1) ?? ''
+  const period = resolveHistoryPeriod(start, end, dates)
+  const map = period ? historyDateCache.peek(`${end}|${territory}`) : undefined
+  return {
+    index,
+    period,
+    summary: period && calendarDayCount(start, end) <= 366
+      ? historySummaryCache.peek(historySummaryQuery(start, end, territory, false))
+      : undefined,
+    map: map?.date === end ? map : undefined,
+  }
+}
+
 export async function loadHistorySummary(
   start: string,
   end: string,
@@ -600,14 +612,10 @@ export async function loadHistorySummary(
   signal?: AbortSignal,
   includeCandidates = false,
 ): Promise<HistorySummaryData> {
-  const query = new URLSearchParams({
-    start, end, territory, records: includeCandidates ? '2' : '1',
-    temperatureTolerance: String(HIGHLIGHT_SIMILARITY.temperatureCelsius),
-    windToleranceKnots: String(HIGHLIGHT_SIMILARITY.windKnots),
-  })
-  return historySummaryCache.get(query.toString(), async (requestSignal) => {
+  const query = historySummaryQuery(start, end, territory, includeCandidates)
+  return historySummaryCache.get(query, async (requestSignal) => {
     const response = await fetch(
-      dataUrl(`historico/summary.json?${query.toString()}`),
+      dataUrl(`historico/summary.json?${query}`),
       { cache: 'default', signal: requestSignal },
     )
     if (!response.ok) throw new Error(`History summary unavailable (${response.status})`)
@@ -654,8 +662,8 @@ export async function loadHistoryBeachHistories(
 
 export async function prepareHistory(territory: TerritoryFilter, signal: AbortSignal): Promise<void> {
   const index = await loadTimelineIndex(signal)
-  const today = lisbonCalendarDate()
-  const dates = index.dates.filter((date) => date < today)
+  const today = lisbonDate()
+  const dates = availableHistoryDates(index.dates.filter((date) => date < today))
   const start = dates[0]
   const end = dates.at(-1)
   if (!start || !end) return
@@ -687,7 +695,7 @@ export async function loadBeachDayDetail(
   const entry = {
     promise: request,
     expiresAt:
-      date < lisbonCalendarDate()
+      date < lisbonDate()
         ? Number.POSITIVE_INFINITY
         : Date.now() + CURRENT_DAY_DETAIL_CACHE_MS,
   }

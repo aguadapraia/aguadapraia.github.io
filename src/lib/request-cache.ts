@@ -4,6 +4,7 @@ interface RequestEntry<T> {
   consumers: number
   expiresAt: number
   settled: boolean
+  value?: T
 }
 
 export class RequestCache<T> {
@@ -15,6 +16,16 @@ export class RequestCache<T> {
   constructor(maximum = 24, ttlMs = 60_000) {
     this.maximum = maximum
     this.ttlMs = ttlMs
+  }
+
+  peek(key: string): T | undefined {
+    const entry = this.entries.get(key)
+    if (!entry) return undefined
+    if (entry.expiresAt <= Date.now()) {
+      this.entries.delete(key)
+      return undefined
+    }
+    return entry.value
   }
 
   get(key: string, load: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -37,6 +48,7 @@ export class RequestCache<T> {
       }
       created.promise = created.promise.then((value) => {
         created.settled = true
+        created.value = value
         created.expiresAt = Date.now() + this.ttlMs
         if (this.pending.get(key) === created) {
           this.pending.delete(key)

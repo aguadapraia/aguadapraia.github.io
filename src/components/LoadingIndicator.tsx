@@ -20,10 +20,14 @@ export default function LoadingIndicator({
         <BrandMark size={variant === 'full' ? 56 : 34} />
       </span>
       <span className="loading-progress" aria-hidden="true">
-        <svg viewBox="0 0 192 12" width="192" height="12">
-          <path d="M0 6q12-8 24 0t24 0t24 0t24 0t24 0t24 0t24 0t24 0"
-            fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
+        <span className="loading-progress-motion">
+          <svg viewBox="0 0 240 12" width="240" height="12" preserveAspectRatio="none">
+            <path className="loading-progress-wave loading-progress-wave--back"
+              d="M-48 5q12 4 24 0t24 0t24 0t24 0t24 0t24 0t24 0t24 0t24 0t24 0t24 0t24 0V12H-48Z" />
+            <path className="loading-progress-wave"
+              d="M-48 7q12-4 24 0t24 0t24 0t24 0t24 0t24 0t24 0t24 0t24 0t24 0t24 0t24 0V12H-48Z" />
+          </svg>
+        </span>
       </span>
       {label && <span className="loading-label">{label}</span>}
     </div>

@@ -28,6 +28,7 @@ interface BeachTableViewProps {
   forecastControl?: ReactNode
   territoryControl?: ReactNode
   suspendedSize?: { width: number; height: number }
+  onReady?: () => void
 }
 
 const TABLE_COPY = {
@@ -103,6 +104,7 @@ export default function BeachTableView({
   forecastControl,
   territoryControl,
   suspendedSize,
+  onReady,
 }: BeachTableViewProps) {
   const uid = useId()
   const [query, setQuery] = useState('')
@@ -113,8 +115,14 @@ export default function BeachTableView({
   const copy = getCopy(language)
   const text = TABLE_COPY[language]
   const locale = language === 'pt' ? 'pt-PT' : 'en-GB'
+  const numberFormats = useMemo(() => ({
+    integer: new Intl.NumberFormat(locale, { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+    decimal: new Intl.NumberFormat(locale, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+  }), [locale])
   const windSuffix = windUnit === 'kmh' ? 'km/h' : 'kn'
   const { district, municipality } = reconcileLocationFilters(beaches, location)
+
+  useEffect(() => { onReady?.() }, [onReady])
 
   useEffect(() => {
     if (location.district !== district || location.municipality !== municipality) {
@@ -148,10 +156,10 @@ export default function BeachTableView({
     ? new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
       .format(new Date(`${activeDate}T12:00:00Z`))
     : text.noDate
-  const reading = (value: number | undefined, unit: string, decimals = 1) => hasTableValue(value)
-    ? <span className="beach-table-reading">{value.toLocaleString(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}<span className="beach-table-unit"> {unit}</span></span>
+  const reading = (value: number | undefined, unit: string, decimals: 0 | 1 = 1) => hasTableValue(value)
+    ? <span className="beach-table-reading">{(decimals === 0 ? numberFormats.integer : numberFormats.decimal).format(value)}<span className="beach-table-unit"> {unit}</span></span>
     : <span className="beach-table-missing-value" aria-label={text.missing} title={text.missing}>—</span>
-  const temperature = (value: number | undefined, decimals = 1) => reading(value, '°C', decimals)
+  const temperature = (value: number | undefined, decimals: 0 | 1 = 1) => reading(value, '°C', decimals)
   const wind = (value: number | undefined) => reading(hasTableValue(value) ? convertWind(value, windUnit) : undefined, windSuffix)
 
   function clearAll() {

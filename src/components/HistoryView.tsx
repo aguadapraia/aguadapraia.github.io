@@ -1,8 +1,9 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Area, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { ArrowLeft, ArrowUp, CalendarDays, ChevronDown, Droplets, Search, ThermometerSun, X, Wind } from 'lucide-react'
 import {
   historyPointFromTimeline,
+  getPreparedHistory,
   loadBeachDayDetail,
   loadHistoryBeachHistories,
   loadHistoryDate,
@@ -32,14 +33,14 @@ import {
 } from '../lib/history-period'
 import { convertWind, type WindUnit } from '../lib/units'
 import { windDirectionDegrees } from '../lib/wind-direction'
+import { formatChartDate as formatDate } from '../lib/relative-date'
 import type { BeachDataset, BeachDayDetail, BeachViewModel, HistoryPoint, MapMetric, SettingsMapMetric, TerritoryAggregate, TerritoryFilter, Theme } from '../types'
 import LoadingIndicator from './LoadingIndicator'
 import ChartSeriesLegend from './ChartSeriesLegend'
 import MapLegend from './MapLegend'
 import TerritorySelect from './TerritorySelect'
+import PortugalMap from './PortugalMap'
 import './history.css'
-
-const PortugalMap = lazy(() => import('./PortugalMap'))
 
 const text = {
   pt: {
@@ -142,6 +143,7 @@ interface HistoryViewProps {
   initialBeachId?: string
   onReturn: () => void
   returnLabel: string
+  onReady?: () => void
 }
 
 type Aggregate = Omit<TerritoryAggregate, 'kind'>
@@ -150,13 +152,6 @@ type ChartPoint = { date: string; [key: string]: string | number | number[] | un
 type ViewPeriodPreset = 'all' | 'month' | 'week' | 'day' | 'custom'
 interface Series { key: string; name: string; color: string }
 interface Summary { id: string; name: string; color: string; values: ({ date: string } & ChartReadings)[] }
-
-function formatDate(date: string, language: Language, year = false) {
-  if (!date) return ''
-  return new Intl.DateTimeFormat(language === 'pt' ? 'pt-PT' : 'en-GB', {
-    day: 'numeric', month: 'short', ...(year ? { year: 'numeric' as const } : {}),
-  }).format(new Date(`${date}T12:00:00Z`))
-}
 
 function finite(value: number | null | undefined): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
@@ -187,11 +182,17 @@ function retainCache<T>(cache: Map<string, T>, key: string, value: T) {
 
 export default function HistoryView({
   dataset, language, windUnit, theme, initialTerritory,
-  initialMapMetric, initialBeachId, onReturn, returnLabel,
+  initialMapMetric, initialBeachId, onReturn, returnLabel, onReady,
 }: HistoryViewProps) {
   const copy = getCopy(language)
   const t = text[language]
   const today = lisbonDate()
+  const [prepared] = useState(() => getPreparedHistory(initialTerritory))
+  const preparedPeriod = prepared?.period
+  const preparedKey = preparedPeriod
+    ? `${dataset.generatedAt}|${preparedPeriod.start}|${preparedPeriod.end}|${initialTerritory}|${preparedPeriod.start === preparedPeriod.end ? 'day' : 'range'}`
+    : ''
+  const preparedMapKey = prepared?.map ? `${dataset.generatedAt}|${initialTerritory}|${prepared.map.date}` : ''
   const [metric, setMetric] = useState<MapMetric>(initialMapMetric)
   const [territory, onTerritoryChange] = useState(initialTerritory)
   const [visibility, setVisibility] = useState(DEFAULT_CHART_VISIBILITY)
@@ -201,25 +202,33 @@ export default function HistoryView({
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchIndex, setSearchIndex] = useState(0)
-  const [indexDates, setIndexDates] = useState<string[]>([])
-  const [indexLoading, setIndexLoading] = useState(true)
+  const [indexDates, setIndexDates] = useState<string[]>(prepared?.index.dates ?? [])
+  const [indexLoading, setIndexLoading] = useState(!prepared)
   const [indexError, setIndexError] = useState(false)
   const [indexRetry, setIndexRetry] = useState(0)
   const [retry, setRetry] = useState(0)
   const [preset, setPreset] = useState<ViewPeriodPreset>('all')
   const [dateMode, setDateMode] = useState<'day' | 'week' | 'month' | 'custom'>('custom')
-  const [period, setPeriod] = useState<HistoryPeriod | null>(null)
-  const [pendingStart, setPendingStart] = useState('')
-  const [pendingEnd, setPendingEnd] = useState('')
+  const [period, setPeriod] = useState<HistoryPeriod | null>(preparedPeriod ?? null)
+  const [pendingStart, setPendingStart] = useState(preparedPeriod?.start ?? '')
+  const [pendingEnd, setPendingEnd] = useState(preparedPeriod?.end ?? '')
   const [periodError, setPeriodError] = useState<'invalid' | 'empty' | null>(null)
   const [mapIndex, setMapIndex] = useState(-1)
-  const [isMobile, setIsMobile] = useState(false)
-  const [summaryResult, setSummaryResult] = useState<ArchiveSummary & { key: string } | null>(null)
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 760px)').matches)
+  const [summaryResult, setSummaryResult] = useState<ArchiveSummary & { key: string } | null>(() =>
+    prepared?.summary && !initialBeachId ? {
+      key: preparedKey,
+      values: prepared.summary.aggregates.filter((value) => preparedPeriod && value.date >= preparedPeriod.start && value.date <= preparedPeriod.end),
+      records: prepared.summary.records,
+    } : null)
   const [historyResult, setHistoryResult] = useState<{ key: string; values: Map<string, HistoryPoint[]> } | null>(null)
   const [detailsResult, setDetailsResult] = useState<{ key: string; values: Map<string, BeachDayDetail>; failed: boolean } | null>(null)
-  const [loadState, setLoadState] = useState<{ key: string; status: 'loading' | 'error' | 'ready' }>({ key: '', status: 'ready' })
-  const [mapResult, setMapResult] = useState<{ key: string; points: TimelinePoint[] } | null>(null)
-  const [mapState, setMapState] = useState<{ key: string; status: 'loading' | 'error' | 'ready' }>({ key: '', status: 'ready' })
+  const [loadState, setLoadState] = useState<{ key: string; status: 'loading' | 'error' | 'ready' }>({
+    key: prepared?.summary && !initialBeachId ? preparedKey : '', status: 'ready',
+  })
+  const [mapResult, setMapResult] = useState<{ key: string; points: TimelinePoint[] } | null>(() =>
+    prepared?.map ? { key: preparedMapKey, points: prepared.map.points.filter((point) => point.date === prepared.map?.date) } : null)
+  const [mapState, setMapState] = useState<{ key: string; status: 'loading' | 'error' | 'ready' }>({ key: preparedMapKey, status: 'ready' })
   const summaryCache = useRef(new Map<string, ArchiveSummary>())
   const historyCache = useRef(new Map<string, Map<string, HistoryPoint[]>>())
   const mapCache = useRef(new Map<string, TimelinePoint[]>())
@@ -249,10 +258,13 @@ export default function HistoryView({
 
   useEffect(() => {
     let active = true
-    setIndexLoading(true)
+    setIndexLoading(!getPreparedHistory(initialTerritory))
     setIndexError(false)
     loadTimelineIndex().then((index) => {
-      if (active) setIndexDates(availableHistoryDates(index.dates))
+      if (active) {
+        const dates = availableHistoryDates(index.dates)
+        setIndexDates((current) => current.length === dates.length && current.every((date, i) => date === dates[i]) ? current : dates)
+      }
     }).catch(() => {
       if (!active) return
       setIndexError(true)
@@ -266,7 +278,9 @@ export default function HistoryView({
 
   useEffect(() => {
     if (indexLoading || indexError || preset !== 'all') return
-    setPeriod(resolveHistoryPeriod(firstArchive, lastArchive, archiveDates))
+    setPeriod((current) => current?.requestedStart === firstArchive && current.requestedEnd === lastArchive &&
+      current.dates.length === archiveDates.length && current.dates.every((date, i) => date === archiveDates[i])
+      ? current : resolveHistoryPeriod(firstArchive, lastArchive, archiveDates))
     setPendingStart(firstArchive)
     setPendingEnd(lastArchive)
   }, [archiveDates, firstArchive, indexError, indexLoading, lastArchive, preset])
@@ -306,8 +320,10 @@ export default function HistoryView({
   const summaryValues = summaryResult?.key === dataKey ? summaryResult.values : []
   const historyValues = historyResult?.key === dataKey ? historyResult.values : new Map<string, HistoryPoint[]>()
   const dayDetails = detailsResult?.key === dataKey ? detailsResult.values : new Map<string, BeachDayDetail>()
-  const loading = indexLoading || (hasDates && (loadState.key !== dataKey || loadState.status === 'loading'))
+  const loading = indexLoading || (!period && archiveDates.length > 0 && !indexError) ||
+    (hasDates && (loadState.key !== dataKey || loadState.status === 'loading'))
   const loadError = loadState.key === dataKey && loadState.status === 'error'
+  useEffect(() => { if (!loading && !loadError && !indexError) onReady?.() }, [loading, loadError, indexError, onReady])
   const partialError = detailsResult?.key === dataKey && detailsResult.failed
   const rankedRecords = useMemo(() => !period || singleDay ? undefined : scope === 'territory'
     ? summaryResult?.key === dataKey ? summaryResult.records : undefined
@@ -316,6 +332,7 @@ export default function HistoryView({
 
   useEffect(() => {
     if (!period || !hasDates) return
+    if (scope === 'territory' && summaryResult?.key === dataKey && loadState.key === dataKey && loadState.status === 'ready') return
     const controller = new AbortController()
     let active = true
     setLoadState({ key: dataKey, status: 'loading' })
@@ -393,6 +410,7 @@ export default function HistoryView({
 
   useEffect(() => {
     if (!mapDate || !mapPublished || mapDate >= today) return
+    if (mapResult?.key === mapKey && mapState.key === mapKey && mapState.status === 'ready') return
     const controller = new AbortController()
     const cached = mapCache.current.get(mapKey)
     if (cached) {
@@ -726,12 +744,10 @@ export default function HistoryView({
               {!singleDay && <button type="button" className="history-text-button" disabled={!mapDate} onClick={() => choosePreset('day', mapDate)}>{t.viewDay}</button>}
             </header>
             <div className="history-map-canvas">
-              <Suspense fallback={<div className="map-loading"><LoadingIndicator variant="compact" label={copy.loading} /></div>}>
                 <PortugalMap beaches={mapBeaches} districtWeather={[]} activeDate={mapDate} language={language} selectedId={recordBeachId || (scope === 'beaches' ? selectedIds[0] ?? '' : '')}
                   territory={territory} theme={theme} windUnit={windUnit} mapMetric={metric} isMobile={isMobile} clusterRadius={36} clusterBaseZoom={6} clusterZoomRate={1.65}
                   onSelect={selectMapBeach} onClusterSelect={(id) => { setRecordFocus(null); addBeach(id) }}
                   onClearSelection={() => { setRecordFocus(null); setSelectedIds([]) }} />
-              </Suspense>
               <MapLegend language={language} metric={metric} windUnit={windUnit} />
               {(indexLoading || mapLoading) && <div className="map-loading"><LoadingIndicator variant="compact" label={copy.loading} /></div>}
               {!indexLoading && !mapLoading && (!mapDates.length || !mapBeaches.length || mapError) && (
