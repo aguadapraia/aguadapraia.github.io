@@ -1,10 +1,8 @@
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode, type RefObject } from 'react'
-import { ChevronDown, ChevronUp, ExternalLink } from 'lucide-react'
-import { getCopy, type Language } from '../i18n'
+import { ChevronDown, ChevronUp } from 'lucide-react'
+import type { Language } from '../i18n'
 import { beachSheetAfterDrag, beachSheetHeight, type BeachSheetLevel } from '../lib/beach-sheet'
 import { formatCompactDate } from '../lib/relative-date'
-import { forecastForDate } from '../lib/beach-discovery'
-import { formatDistance } from '../lib/units'
 import type { BeachViewModel } from '../types'
 
 interface BeachDetailPanelProps {
@@ -18,7 +16,6 @@ interface BeachDetailPanelProps {
 export default function BeachDetailPanel({ beach, date, language, scrollRef, children }: BeachDetailPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   const headingRef = useRef<HTMLDivElement>(null)
-  const sourceRef = useRef<HTMLDivElement>(null)
   const drag = useRef<{ id: number; y: number; height: number; toggle: boolean } | null>(null)
   const previousLevel = useRef<BeachSheetLevel>('summary')
   const [level, setLevel] = useState<BeachSheetLevel>('summary')
@@ -28,9 +25,7 @@ export default function BeachDetailPanel({ beach, date, language, scrollRef, chi
   const [dragHeight, setDragHeight] = useState<number | null>(null)
   const id = useId()
   const pt = language === 'pt'
-  const copy = getCopy(language)
   const name = beach.name
-  const forecast = forecastForDate(beach, date)
   const collapsed = mobile && level === 'collapsed'
 
   useLayoutEffect(() => {
@@ -38,9 +33,8 @@ export default function BeachDetailPanel({ beach, date, language, scrollRef, chi
     const header = stage?.querySelector('.beach-sidebar-header')
     const heading = headingRef.current
     const body = scrollRef.current
-    const source = sourceRef.current
     const history = body?.querySelector('.beach-detail-history')
-    if (!stage || !header || !heading || !body || !history || !source) {
+    if (!stage || !header || !heading || !body || !history) {
       console.warn('Beach detail panel could not find its layout containers')
       return
     }
@@ -53,8 +47,8 @@ export default function BeachDetailPanel({ beach, date, language, scrollRef, chi
       setDragHeight(null)
     }
     const measureContent = () => {
-      if (stage.getAttribute('data-suspended') === 'true' || stage.getBoundingClientRect().height < 1 || source.getBoundingClientRect().height < 1) return
-      const height = heading.getBoundingClientRect().height + source.getBoundingClientRect().height +
+      if (stage.getAttribute('data-suspended') === 'true' || stage.getBoundingClientRect().height < 1 || body.clientHeight < 1) return
+      const height = heading.getBoundingClientRect().height +
         history.getBoundingClientRect().bottom - body.getBoundingClientRect().top + body.scrollTop + 12
       setSummaryHeight(Math.ceil(height))
     }
@@ -64,7 +58,6 @@ export default function BeachDetailPanel({ beach, date, language, scrollRef, chi
     const contentObserver = new ResizeObserver(measureContent)
     contentObserver.observe(heading)
     contentObserver.observe(history)
-    contentObserver.observe(source)
     if (body.firstElementChild) contentObserver.observe(body.firstElementChild)
     media.addEventListener('change', resize)
     resize()
@@ -136,13 +129,6 @@ export default function BeachDetailPanel({ beach, date, language, scrollRef, chi
         </button>
       </div>
       <div className="beach-sidebar-body" id={id} ref={scrollRef} inert={collapsed}>{children}</div>
-      <div className="beach-data-note beach-panel-source" ref={sourceRef} inert={collapsed}>
-        {forecast && <p>{pt ? 'Ar: previsão de' : 'Air: forecast for'} {forecast.airLocation} · {formatDistance(forecast.airDistanceKm)}</p>}
-        <a target="_blank" rel="noreferrer noopener"
-          href={`https://www.ipma.pt/pt/maritima/costeira/index.jsp?selLocal=${encodeURIComponent(beach.id)}&idLocal=${encodeURIComponent(beach.id)}`}>
-          {pt ? 'Ver praia no IPMA.pt' : 'View beach on IPMA.pt'}<ExternalLink size={12} /><span className="sr-only">{copy.opensNewWindow}</span>
-        </a>
-      </div>
     </div>
   )
 }

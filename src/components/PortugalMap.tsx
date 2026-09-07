@@ -47,9 +47,10 @@ import {
   filterDistricts,
   fitMapProjection,
   groupMapPoints,
+  islandWeatherAnchor,
   mapFitExtent,
+  mapMarkerFootprint,
   mapMarkerGeometry,
-  mapMarkerRadius,
   mapMarkerScale,
   mapMarkerValueSize,
   prepareDistricts,
@@ -314,6 +315,17 @@ export default function PortugalMap({
       ),
     [activeDate, districtWeather, territory],
   )
+  const weatherLocations = useMemo(() => activeWeather.map((weather) => {
+    const location: [number, number] = [weather.longitude, weather.latitude]
+    const region = coordinateTerritory(...location)
+    const index = districtFeatureIndexByLocation.get(weather.locationId)
+    const district = index === undefined ? undefined : districts?.features[index]
+    const archipelago = districts?.features[region === 'madeira' ? 0 : 1]
+    const anchor = region !== 'mainland' && archipelago
+      ? islandWeatherAnchor(archipelago.geometry, location)
+      : district ? geoCentroid(district) : location
+    return { weather, anchor }
+  }), [activeWeather, districts])
   const clusterZoom = clusterZoomLevel(
     transform.k,
     1,
@@ -352,24 +364,25 @@ export default function PortugalMap({
   })
   const weatherMarkers = useMemo(() => {
     if (!projection) return []
-    const candidates = [...activeWeather].sort((a, b) => a.locationId - b.locationId).flatMap((weather) => {
-      const index = districtFeatureIndexByLocation.get(weather.locationId)
-      const feature = index === undefined ? undefined : districts?.features[index]
-      const point = projection(feature ? geoCentroid(feature) : [weather.longitude, weather.latitude])
+    const candidates = [...weatherLocations].sort((a, b) => a.weather.locationId - b.weather.locationId).flatMap(({ weather, anchor }) => {
+      const point = projection(anchor)
       if (!point) return []
       const [x, y] = transform.apply(point)
       return [{ weather, x, y }]
     })
-    const obstacles = markerGroups.map(({ anchor, points }) => {
-      const diameter = mapMarkerRadius(anchor.id === selectedId, transform.k, points.length > 1) * 2
-      return { x: anchor.x + transform.x, y: anchor.y + transform.y, width: diameter, height: diameter }
-    })
+    const obstacles = markerGroups.flatMap(({ anchor, points }) =>
+      mapMarkerFootprint(anchor.id === selectedId, transform.k, points.length > 1).map((circle) => ({
+        x: anchor.x + transform.x + circle.x,
+        y: anchor.y + transform.y + circle.y,
+        width: circle.radius * 2,
+        height: circle.radius * 2,
+      })))
     obstacles.push(
       { x: viewport.width / 2, y: viewport.height - 24, width: viewport.width, height: 48 },
       { x: viewport.width - 34, y: viewport.height - 86, width: 60, height: 160 },
     )
     return placeWeatherBadges(candidates, viewport, obstacles, isMobile ? 12 : 8)
-  }, [activeWeather, districts, isMobile, markerGroups, projection, selectedId, transform, viewport])
+  }, [isMobile, markerGroups, projection, selectedId, transform, viewport, weatherLocations])
   const hoveredBeach = hoveredId ? beachesById.get(hoveredId) : undefined
   const markerScreenScale = mapMarkerScale(transform.k)
   const markerScale = markerScreenScale / transform.k
@@ -618,6 +631,7 @@ export default function PortugalMap({
           cancelClusterAction()
           select(event.currentTarget).interrupt()
           setPopupAnchorId('')
+          event.currentTarget.focus({ preventScroll: true })
           onClearSelection()
         }}
       >

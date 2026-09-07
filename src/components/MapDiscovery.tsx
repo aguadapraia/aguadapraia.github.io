@@ -5,7 +5,7 @@ import { getCopy, type Language } from '../i18n'
 import { forecastForDate, forecastHighlights, nearestBeach } from '../lib/beach-discovery'
 import { normalizeBeachSearch } from '../lib/beach-search'
 import { HIGHLIGHT_SIMILARITY } from '../lib/highlight-policy'
-import { formatWind, type WindUnit } from '../lib/units'
+import { convertWind, type WindUnit } from '../lib/units'
 import type { BeachViewModel, MapMetric, TerritoryFilter } from '../types'
 
 interface MapDiscoveryProps {
@@ -218,7 +218,9 @@ export default function MapDiscovery({
               {items.map((item) => <button type="button" key={item.beach.id}
                 title={`${heading} · ${item.beach.name} · ${item.beach.municipality} · ${item.beach.district}`} onClick={() => chooseBeach(item.beach)}>
                 <span><strong>{item.beach.name}</strong><small>{item.beach.municipality} · {item.beach.district}</small></span>
-                <b><Icon className="highlight-value-icon" size={14} aria-hidden="true" />{value === 'wind' ? formatWind(item.value, windUnit) : `${item.value.toFixed(value === 'water' ? 1 : 0)}°`}</b>
+                <b><Icon className="highlight-value-icon" size={14} aria-hidden="true" />{value === 'wind'
+                  ? <>{convertWind(item.value, windUnit).toFixed(1)}<small className="beach-highlight-unit"> {windUnit === 'kmh' ? 'km/h' : 'kn'}</small></>
+                  : `${item.value.toFixed(value === 'water' ? 1 : 0)}°`}</b>
               </button>)}
             </section>
           })}

@@ -207,7 +207,6 @@ export default function App() {
   function closeBeachDetails() {
     setSelectedId(null)
     setNearbyIds([])
-    document.querySelector<HTMLInputElement>('.beach-search-field input')?.focus()
   }
 
   if (loadError) return (

@@ -1,5 +1,5 @@
-import { geoMercator, type GeoPermissibleObjects } from 'd3-geo'
-import type { Feature, FeatureCollection, Geometry } from 'geojson'
+import { geoCentroid, geoContains, geoDistance, geoMercator, type GeoPermissibleObjects } from 'd3-geo'
+import type { Feature, FeatureCollection, Geometry, Polygon } from 'geojson'
 import type { TerritoryFilter } from '../types'
 
 export interface MapSize {
@@ -35,6 +35,23 @@ export function prepareDistricts(collection: FeatureCollection<Geometry>) {
       geometry: rewindGeometry(feature.geometry),
     })),
   }
+}
+
+export function islandWeatherAnchor(geometry: Geometry, location: [number, number]): [number, number] {
+  const islands: Polygon[] = geometry.type === 'Polygon' ? [geometry]
+    : geometry.type === 'MultiPolygon' ? geometry.coordinates.map((coordinates) => ({ type: 'Polygon', coordinates }))
+    : []
+  if (!islands.length) throw new Error('Island weather requires polygon geometry')
+  // Rounded coastal coordinates can fall just offshore; compare coastlines,
+  // not centres, to avoid confusing neighbouring islands such as Pico and Faial.
+  const island = islands.find((polygon) => geoContains(polygon, location)) ??
+    islands.reduce((nearest, polygon) => {
+      const distance = polygon.coordinates[0].reduce((minimum, point) =>
+        Math.min(minimum, geoDistance(location, [point[0], point[1]])), Infinity)
+      return distance < nearest.distance ? { polygon, distance } : nearest
+    }, { polygon: islands[0], distance: Infinity }).polygon
+  const centre = geoCentroid(island)
+  return geoContains(island, centre) ? centre : location
 }
 
 export function mapFitExtent({ width, height }: MapSize): [[number, number], [number, number]] {
@@ -87,7 +104,7 @@ export function mapMarkerValueSize(zoomScale: number) {
     Math.min(1, Math.max(0, step - 2)) * 0.5
 }
 
-function markerFootprint(selected: boolean, zoomScale: number, cluster = true) {
+export function mapMarkerFootprint(selected: boolean, zoomScale: number, cluster = true) {
   const radius = selected ? mapMarkerGeometry.selectedRadius : mapMarkerGeometry.radius
   const stroke = selected ? mapMarkerGeometry.selectedStroke : mapMarkerGeometry.focusStroke
   const scale = mapMarkerScale(zoomScale)
@@ -102,13 +119,13 @@ function markerFootprint(selected: boolean, zoomScale: number, cluster = true) {
 }
 
 export function mapMarkerRadius(selected = false, zoomScale = 1, cluster = true) {
-  return Math.max(...markerFootprint(selected, zoomScale, cluster).map((circle) =>
+  return Math.max(...mapMarkerFootprint(selected, zoomScale, cluster).map((circle) =>
     Math.hypot(circle.x, circle.y) + circle.radius))
 }
 
 function footprintsOverlap(
-  a: MapPoint, aFootprint: ReturnType<typeof markerFootprint>,
-  b: MapPoint, bFootprint: ReturnType<typeof markerFootprint>,
+  a: MapPoint, aFootprint: ReturnType<typeof mapMarkerFootprint>,
+  b: MapPoint, bFootprint: ReturnType<typeof mapMarkerFootprint>,
 ) {
   return aFootprint.some((first) => bFootprint.some((second) =>
     (a.x + first.x - b.x - second.x) ** 2 +
@@ -116,8 +133,8 @@ function footprintsOverlap(
     (first.radius + second.radius + mapMarkerGeometry.gap) ** 2))
 }
 
-// Fixed anchors avoid joining a whole coastline through a chain of neighbours.
-// First reserve rim badges, then release unused space without moving any anchor.
+// Reserve rim badges, release unused space, then split locally at real beaches.
+// A selected anchor stays fixed; other anchors change only to expose more choices.
 export function groupMapPoints<T extends MapPoint>(
   points: readonly T[],
   radius: number,
@@ -125,10 +142,10 @@ export function groupMapPoints<T extends MapPoint>(
   zoomScale = 1,
 ): MapPointGroup<T>[] {
   const distance = Math.max(radius, mapMarkerRadius(true, zoomScale) * 2 + mapMarkerGeometry.gap)
-  const normalFootprint = markerFootprint(false, zoomScale)
-  const selectedFootprint = markerFootprint(true, zoomScale)
-  const normalSingle = markerFootprint(false, zoomScale, false)
-  const selectedSingle = markerFootprint(true, zoomScale, false)
+  const normalFootprint = mapMarkerFootprint(false, zoomScale)
+  const selectedFootprint = mapMarkerFootprint(true, zoomScale)
+  const normalSingle = mapMarkerFootprint(false, zoomScale, false)
+  const selectedSingle = mapMarkerFootprint(true, zoomScale, false)
   const footprint = (point: T, cluster: boolean) => point.id === selectedId
     ? cluster ? selectedFootprint : selectedSingle
     : cluster ? normalFootprint : normalSingle
@@ -138,7 +155,9 @@ export function groupMapPoints<T extends MapPoint>(
     if (a.id === b.id) return 0
     if (a.id === selectedId) return -1
     if (b.id === selectedId) return 1
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+    // Sweep geography rather than catalog IDs, which otherwise seed the middle
+    // of neighbouring stretches and strand usable space between their anchors.
+    return a.y - b.y || a.x - b.x || (a.id < b.id ? -1 : 1)
   })
   for (const point of sorted) {
     if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue
@@ -183,6 +202,63 @@ export function groupMapPoints<T extends MapPoint>(
     groups.push({ anchor: members[0], points: members })
   }
 
+  const repartition = (source: MapPointGroup<T>) => {
+    if (source.anchor.id === selectedId) return false
+    let minX = source.anchor.x, maxX = minX
+    let minY = source.anchor.y, maxY = minY
+    for (const point of source.points) {
+      minX = Math.min(minX, point.x)
+      maxX = Math.max(maxX, point.x)
+      minY = Math.min(minY, point.y)
+      maxY = Math.max(maxY, point.y)
+    }
+    if ((maxX - minX) ** 2 + (maxY - minY) ** 2 <
+      (normalSingle[0].radius * 2 + mapMarkerGeometry.gap) ** 2) return false
+    // An interior representative can block both ends of its own group. Bisect
+    // at its farthest feasible pair, checking the badges after nearest assignment.
+    // Only this group changes, and every accepted exchange adds a visible choice.
+    const neighbours = groups.filter((other) => other !== source)
+    const candidates = source.points.flatMap((point) => {
+      if (neighbours.some((other) => footprintsOverlap(
+        point, normalSingle, other.anchor, footprint(other.anchor, other.points.length > 1)))) return []
+      return [{
+        point,
+        cluster: neighbours.every((other) => !footprintsOverlap(
+          point, normalFootprint, other.anchor, footprint(other.anchor, other.points.length > 1))),
+      }]
+    })
+    let best: [T[], T[]] | undefined
+    let bestDistance = -1
+    for (let first = 0; first < candidates.length; first++) {
+      const a = candidates[first]
+      for (let second = first + 1; second < candidates.length; second++) {
+        const b = candidates[second]
+        const squared = (a.point.x - b.point.x) ** 2 + (a.point.y - b.point.y) ** 2
+        if (squared <= bestDistance ||
+          footprintsOverlap(a.point, normalSingle, b.point, normalSingle)) continue
+        const left = [a.point]
+        const right = [b.point]
+        for (const point of source.points) {
+          if (point === a.point || point === b.point) continue
+          const distanceA = (point.x - a.point.x) ** 2 + (point.y - a.point.y) ** 2
+          const distanceB = (point.x - b.point.x) ** 2 + (point.y - b.point.y) ** 2
+          if (distanceA <= distanceB) left.push(point)
+          else right.push(point)
+        }
+        if ((left.length > 1 && !a.cluster) || (right.length > 1 && !b.cluster) ||
+          footprintsOverlap(a.point, footprint(a.point, left.length > 1),
+            b.point, footprint(b.point, right.length > 1))) continue
+        best = [left, right]
+        bestDistance = squared
+      }
+    }
+    if (!best) return false
+    source.anchor = best[0][0]
+    source.points = best[0]
+    groups.push({ anchor: best[1][0], points: best[1] })
+    return true
+  }
+
   let changed = true
   while (changed) {
     changed = false
@@ -210,6 +286,7 @@ export function groupMapPoints<T extends MapPoint>(
           changed = true
         }
       }
+      if (group.points.length > 1 && repartition(group)) changed = true
     }
   }
   return groups
