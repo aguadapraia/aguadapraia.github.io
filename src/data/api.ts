@@ -17,6 +17,8 @@ import { classifyDate } from '../lib/date-classification'
 import { canonicalBeachName } from '../lib/beach-name'
 import { publicAssetUrl } from '../lib/public-asset'
 import { HIGHLIGHT_SIMILARITY } from '../lib/highlight-policy'
+import { RequestCache } from '../lib/request-cache'
+import { historyRequestChunks } from '../lib/history-period'
 
 function dataUrl(
   subpath: string,
@@ -398,9 +400,10 @@ const beachDayDetailSchema: z.ZodType<BeachDayDetail> = z.object({
 
 const dayDetailCache = new Map<string, DayDetailCacheEntry>()
 const CURRENT_DAY_DETAIL_CACHE_MS = 60_000
-let timelineIndexCache:
-  | { promise: Promise<TimelineIndexData>; expiresAt: number }
-  | undefined
+const timelineIndexCache = new RequestCache<TimelineIndexData>(1)
+const historySummaryCache = new RequestCache<HistorySummaryData>()
+const historyDateCache = new RequestCache<HistoryDateData>()
+const historyBeachCache = new RequestCache<HistoryBeachHistoriesData>()
 
 function lisbonCalendarDate(date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -578,25 +581,16 @@ function forecastDatesFromPayload(payload: RawPayload): string[] {
   return forecastDates
 }
 
-export async function loadTimelineIndex(): Promise<TimelineIndexData> {
-  if (timelineIndexCache && timelineIndexCache.expiresAt > Date.now()) {
-    return timelineIndexCache.promise
-  }
-  const promise = (async () => {
+export function loadTimelineIndex(signal?: AbortSignal): Promise<TimelineIndexData> {
+  return timelineIndexCache.get('index', async (requestSignal) => {
     const response = await fetch(dataUrl('historico/index.json'), {
-      cache: 'default',
+      cache: 'default', signal: requestSignal,
     })
     if (!response.ok) {
       throw new Error('Published timeline index is unavailable')
     }
     return timelineIndexSchema.parse(await response.json())
-  })()
-  const entry = { promise, expiresAt: Date.now() + 60_000 }
-  timelineIndexCache = entry
-  promise.catch(() => {
-    if (timelineIndexCache === entry) timelineIndexCache = undefined
-  })
-  return promise
+  }, signal)
 }
 
 export async function loadHistorySummary(
@@ -611,14 +605,14 @@ export async function loadHistorySummary(
     temperatureTolerance: String(HIGHLIGHT_SIMILARITY.temperatureCelsius),
     windToleranceKnots: String(HIGHLIGHT_SIMILARITY.windKnots),
   })
-  const response = await fetch(
-    dataUrl(`historico/summary.json?${query.toString()}`),
-    { cache: 'default', signal },
-  )
-  if (!response.ok) {
-    throw new Error(`History summary unavailable (${response.status})`)
-  }
-  return historySummarySchema.parse(await response.json())
+  return historySummaryCache.get(query.toString(), async (requestSignal) => {
+    const response = await fetch(
+      dataUrl(`historico/summary.json?${query.toString()}`),
+      { cache: 'default', signal: requestSignal },
+    )
+    if (!response.ok) throw new Error(`History summary unavailable (${response.status})`)
+    return historySummarySchema.parse(await response.json())
+  }, signal)
 }
 
 export async function loadHistoryDate(
@@ -627,14 +621,14 @@ export async function loadHistoryDate(
   signal?: AbortSignal,
 ): Promise<HistoryDateData> {
   const query = new URLSearchParams({ territory })
-  const response = await fetch(
-    dataUrl(`historico/date/${date}.json?${query.toString()}`),
-    { cache: 'default', signal },
-  )
-  if (!response.ok) {
-    throw new Error(`History date unavailable (${response.status})`)
-  }
-  return historyDateSchema.parse(await response.json())
+  return historyDateCache.get(`${date}|${territory}`, async (requestSignal) => {
+    const response = await fetch(
+      dataUrl(`historico/date/${date}.json?${query.toString()}`),
+      { cache: 'default', signal: requestSignal },
+    )
+    if (!response.ok) throw new Error(`History date unavailable (${response.status})`)
+    return historyDateSchema.parse(await response.json())
+  }, signal)
 }
 
 export async function loadHistoryBeachHistories(
@@ -648,14 +642,28 @@ export async function loadHistoryBeachHistories(
     start,
     end,
   })
-  const response = await fetch(
-    dataUrl(`historico/beaches.json?${query.toString()}`),
-    { cache: 'default', signal },
-  )
-  if (!response.ok) {
-    throw new Error(`History beach histories unavailable (${response.status})`)
-  }
-  return historyBeachHistoriesSchema.parse(await response.json())
+  return historyBeachCache.get(query.toString(), async (requestSignal) => {
+    const response = await fetch(
+      dataUrl(`historico/beaches.json?${query.toString()}`),
+      { cache: 'default', signal: requestSignal },
+    )
+    if (!response.ok) throw new Error(`History beach histories unavailable (${response.status})`)
+    return historyBeachHistoriesSchema.parse(await response.json())
+  }, signal)
+}
+
+export async function prepareHistory(territory: TerritoryFilter, signal: AbortSignal): Promise<void> {
+  const index = await loadTimelineIndex(signal)
+  const today = lisbonCalendarDate()
+  const dates = index.dates.filter((date) => date < today)
+  const start = dates[0]
+  const end = dates.at(-1)
+  if (!start || !end) return
+  const chunks = historyRequestChunks(start, end)
+  // Prepare a bounded overview, not every beach or the entire growing archive.
+  const first = chunks[0]
+  await loadHistorySummary(first.start, first.end, territory, signal, chunks.length > 1)
+  await loadHistoryDate(end, territory, signal)
 }
 
 export async function loadBeachDayDetail(
@@ -693,9 +701,10 @@ export async function loadBeachDayDetail(
 }
 
 export async function loadBeachDataset(): Promise<BeachDataset> {
+  const signal = AbortSignal.timeout(30_000)
   const [latestResponse, metadataResponse] = await Promise.all([
-    fetch(dataUrl('latest.json'), { cache: 'default' }),
-    fetch(publicAssetUrl('data/beach-metadata.json'), { cache: 'no-cache' }),
+    fetch(dataUrl('latest.json'), { cache: 'default', signal }),
+    fetch(publicAssetUrl('data/beach-metadata.json'), { cache: 'no-cache', signal }),
   ])
   if (!latestResponse.ok || !metadataResponse.ok) {
     throw new Error('Published beach data is unavailable')

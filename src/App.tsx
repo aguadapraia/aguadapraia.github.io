@@ -7,7 +7,7 @@ import MapDiscovery from './components/MapDiscovery'
 import MapLegend from './components/MapLegend'
 import SettingsPanel from './components/SettingsPanel'
 import TerritorySelect from './components/TerritorySelect'
-import { loadBeachDataset } from './data/api'
+import { loadBeachDataset, prepareHistory } from './data/api'
 import { getCopy } from './i18n'
 import { lisbonDate, preferredForecastDate } from './lib/date-classification'
 import { formatFreshnessTimestamp } from './lib/freshness'
@@ -18,7 +18,8 @@ import type { BeachDataset, BeachViewModel, TerritoryFilter } from './types'
 import './app.css'
 
 const PortugalMap = lazy(() => import('./components/PortugalMap'))
-const HistoryView = lazy(() => import('./components/HistoryView'))
+const loadHistoryView = () => import('./components/HistoryView')
+const HistoryView = lazy(loadHistoryView)
 const BeachTableView = lazy(() => import('./components/BeachTableView'))
 
 function GithubMark() {
@@ -64,6 +65,28 @@ export default function App() {
     })
     return () => { active = false }
   }, [loadAttempt])
+
+  useEffect(() => {
+    if (!dataset) return
+    const controller = new AbortController()
+    const prepare = () => {
+      if (document.visibilityState !== 'visible') return
+      void prepareHistory(territory, controller.signal)
+        .then(() => { if (!controller.signal.aborted) return loadHistoryView() })
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted) console.warn('Background history preparation failed:', error)
+        })
+    }
+    // Let the current forecasts render first; navigation reuses these requests.
+    const timeout = window.setTimeout(prepare, 500)
+    const visible = () => { if (document.visibilityState === 'visible') prepare() }
+    document.addEventListener('visibilitychange', visible)
+    return () => {
+      window.clearTimeout(timeout)
+      document.removeEventListener('visibilitychange', visible)
+      controller.abort()
+    }
+  }, [dataset, territory])
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
