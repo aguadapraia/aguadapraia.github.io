@@ -4,9 +4,11 @@
 
 # ÁguaDaPraia
 
-Portugal beach forecasts using meteorological and oceanographic data from IPMA.pt, focused on water temperature, air temperature, average wind conditions, and saved forecast history.
+ÁguaDaPraia makes Portugal's beach forecasts easier to explore, using meteorological and oceanographic data from IPMA.pt. It brings together water temperature, air temperature, average wind conditions and a history of saved forecasts.
 
-Built for fun as a non-commercial project I found useful myself, through approximately five days of iterative development with GPT-5.6.
+The idea came from a summer news story about sea temperatures in northern Portugal being unusually warmer than in the south. It made me curious about the beaches I usually visited: how did they compare, and how did their forecasts change over time? I wanted a simpler way to explore those questions, especially on mobile devices, with a responsive design that works well across different screen sizes.
+
+I built ÁguaDaPraia as something useful for myself, with no commercial purpose. It was also an opportunity to build something from scratch with GPT-5.6. The initial version came together through approximately five days of iterative development.
 
 Filipe Caetano © 2026
 
