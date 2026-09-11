@@ -3,6 +3,7 @@ import type {
   BeachDayAir,
   BeachDayDetail,
   BeachDaySummary,
+  BeachTideForecast,
   BeachViewModel,
   DailyBeachForecast,
   DistrictWeatherForecast,
@@ -20,6 +21,7 @@ import { HIGHLIGHT_SIMILARITY } from '../lib/highlight-policy'
 import { RequestCache } from '../lib/request-cache'
 import { availableHistoryDates, calendarDayCount, historyRequestChunks, resolveHistoryPeriod } from '../lib/history-period'
 import { formatCompactDate } from '../lib/relative-date'
+import { dateInTimeZone } from '../lib/time-zone'
 
 function dataUrl(
   subpath: string,
@@ -399,12 +401,58 @@ const beachDayDetailSchema: z.ZodType<BeachDayDetail> = z.object({
   hourlyTimeZone: z.literal('UTC').optional(),
 })
 
+const beachTideForecastSchema: z.ZodType<BeachTideForecast> = z.object({
+  schemaVersion: z.literal(1),
+  beachId: z.string().regex(/^\d+$/),
+  date: z.string().date(),
+  timeZone: z.enum(['Europe/Lisbon', 'Atlantic/Madeira', 'Atlantic/Azores']),
+  status: z.enum(['available', 'stale', 'unsupported', 'unavailable']),
+  reference: z.object({
+    portId: z.string().regex(/^\d+$/),
+    name: z.string().min(1),
+    distanceKm: z.number().nonnegative(),
+    approximate: z.literal(true),
+  }).nullable(),
+  source: z.object({
+    name: z.literal('Instituto Hidrográfico'),
+    url: z.literal('https://www.hidrografico.pt/'),
+  }),
+  events: z.array(z.object({
+    timeUtc: z.string().datetime(),
+    kind: z.enum(['low', 'high']),
+    heightMeters: z.number().min(-5).max(20),
+  })).max(8),
+  updatedAt: z.string().datetime({ offset: true }).nullable(),
+  reason: z.enum(['no-reference', 'not-collected', 'missing-day', 'source-error']).optional(),
+}).superRefine((forecast, context) => {
+  const hasForecast = forecast.status === 'available' || forecast.status === 'stale'
+  if (hasForecast && (!forecast.reference || !forecast.updatedAt || forecast.events.length === 0)) {
+    context.addIssue({ code: 'custom', message: 'Tide forecast is incomplete' })
+  }
+  if (!hasForecast && forecast.events.length !== 0) {
+    context.addIssue({ code: 'custom', message: 'Unavailable tide forecast contains events' })
+  }
+  if (forecast.status === 'unsupported' && forecast.reference !== null) {
+    context.addIssue({ code: 'custom', message: 'Unsupported tide forecast contains a reference' })
+  }
+  forecast.events.forEach((event, index) => {
+    if (!Number.isFinite(Date.parse(event.timeUtc))) return
+    if (dateInTimeZone(event.timeUtc, forecast.timeZone) !== forecast.date) {
+      context.addIssue({ code: 'custom', message: 'Tide event falls outside the selected local date' })
+    }
+    if (index > 0 && Date.parse(event.timeUtc) <= Date.parse(forecast.events[index - 1].timeUtc)) {
+      context.addIssue({ code: 'custom', message: 'Tide events must be unique and chronological' })
+    }
+  })
+})
+
 const dayDetailCache = new Map<string, DayDetailCacheEntry>()
 const CURRENT_DAY_DETAIL_CACHE_MS = 60_000
 const timelineIndexCache = new RequestCache<TimelineIndexData>(1)
 const historySummaryCache = new RequestCache<HistorySummaryData>()
 const historyDateCache = new RequestCache<HistoryDateData>()
 const historyBeachCache = new RequestCache<HistoryBeachHistoriesData>()
+const beachTideCache = new RequestCache<BeachTideForecast>()
 
 function requiredNumber(value: number | null, context: string) {
   if (value === null || !Number.isFinite(value)) {
@@ -689,7 +737,11 @@ export async function loadBeachDayDetail(
     if (!response.ok) {
       throw new Error(`Beach day detail unavailable: ${beachId}/${date} (${response.status})`)
     }
-    return beachDayDetailSchema.parse(await response.json())
+    const detail = beachDayDetailSchema.parse(await response.json())
+    if (detail.beachId !== beachId || detail.date !== date) {
+      throw new Error('Hourly forecast does not match the selected beach and date')
+    }
+    return detail
   })()
 
   const entry = {
@@ -706,6 +758,25 @@ export async function loadBeachDayDetail(
     }
   })
   return request
+}
+
+export async function loadBeachTideForecast(
+  beachId: string,
+  date: string,
+  signal?: AbortSignal,
+): Promise<BeachTideForecast> {
+  const key = `${beachId}/${date}`
+  return beachTideCache.get(key, async (requestSignal) => {
+    const response = await fetch(dataUrl(`beach/${encodeURIComponent(beachId)}/tides/${encodeURIComponent(date)}`), {
+      cache: 'default', signal: requestSignal,
+    })
+    if (!response.ok) throw new Error(`Tide forecast unavailable: ${key} (${response.status})`)
+    const forecast = beachTideForecastSchema.parse(await response.json())
+    if (forecast.beachId !== beachId || forecast.date !== date) {
+      throw new Error('Tide forecast does not match the selected beach and date')
+    }
+    return forecast
+  }, signal)
 }
 
 export async function loadBeachDataset(): Promise<BeachDataset> {

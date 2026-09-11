@@ -2,6 +2,7 @@ import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode }
 import { ChevronDown, Droplets, History, Map, Search, ThermometerSun, Wind, X } from 'lucide-react'
 import { getCopy, type Language } from '../i18n'
 import { convertWind, formatDistance, type WindUnit } from '../lib/units'
+import { timeZoneForBeach } from '../lib/time-zone'
 import {
   defaultSortState,
   filterBeaches,
@@ -15,6 +16,7 @@ import {
 } from '../lib/beach-table'
 import { Button } from './ui/button'
 import BeachDayHours from './BeachDayHours'
+import BeachTides from './BeachTides'
 import type { BeachViewModel } from '../types'
 import './beach-table.css'
 
@@ -309,14 +311,18 @@ export default function BeachTableView({
                                 </p>
                               )}
                               {activeDate && (
-                                <BeachDayHours
-                                  key={`${beach.id}/${activeDate}`}
-                                  beachId={beach.id}
-                                  date={activeDate}
-                                  language={language}
-                                  windUnit={windUnit}
-                                  layout="compact"
-                                />
+                                <>
+                                  <BeachDayHours
+                                    key={`${beach.id}/${activeDate}`}
+                                    beachId={beach.id}
+                                    date={activeDate}
+                                    language={language}
+                                    windUnit={windUnit}
+                                    timeZone={timeZoneForBeach(beach.territory)}
+                                    layout="compact"
+                                  />
+                                  <BeachTides beachId={beach.id} date={activeDate} language={language} timeZone={timeZoneForBeach(beach.territory)} />
+                                </>
                               )}
                             </section>
                           </td>

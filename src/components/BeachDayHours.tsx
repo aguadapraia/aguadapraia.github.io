@@ -1,22 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ArrowUp, Clock3 } from 'lucide-react'
 import { loadBeachDayDetail } from '../data/api'
 import { getCopy, type Language } from '../i18n'
-import { daytimeReadings, hasHourlyAir } from '../lib/daytime-hours'
+import { daytimeReadings, hasHourlyAir, localDaytimeWindow } from '../lib/daytime-hours'
 import { convertWind, type WindUnit } from '../lib/units'
 import { windDirectionDegrees } from '../lib/wind-direction'
-import type { BeachDayDetail } from '../types'
+import type { BeachDayDetail, ForecastTimeZone } from '../types'
 import LoadingIndicator from './LoadingIndicator'
 
-const DAYTIME_HOURS = Array.from({ length: 11 }, (_, index) => index + 8)
-
 export default function BeachDayHours({
-  beachId, date, language, windUnit, layout = 'vertical',
+  beachId, date, language, windUnit, timeZone, layout = 'vertical',
 }: {
   beachId: string
   date: string
   language: Language
   windUnit: WindUnit
+  timeZone: ForecastTimeZone
   layout?: 'vertical' | 'compact'
 }) {
   const [open, setOpen] = useState(true)
@@ -29,6 +28,7 @@ export default function BeachDayHours({
   const directionHint = language === 'pt' ? 'Origem do vento; seta no sentido em que sopra' : 'Wind origin; arrow points downwind'
   const missingLabel = language === 'pt' ? 'Sem dados' : 'No data'
   const dailyAirHint = language === 'pt' ? 'mín–máx diária · sem dados horários' : 'daily min–max · no hourly data'
+  const hourWindow = useMemo(() => date ? localDaytimeWindow(date, timeZone, language) : null, [date, timeZone, language])
 
   useEffect(() => {
     setDetail(null)
@@ -46,9 +46,11 @@ export default function BeachDayHours({
   }, [beachId, date, shouldLoad, attempt])
 
   const currentDetail = detail?.beachId === beachId && detail.date === date ? detail : null
-  const readings = currentDetail ? daytimeReadings(currentDetail.hourly) : []
+  const readings = currentDetail && hourWindow ? daytimeReadings(currentDetail.hourly, hourWindow) : []
   const hourlyAir = hasHourlyAir(readings)
-  const hoursLabel = `08–18h${currentDetail?.hourlyTimeZone ? ` ${currentDetail.hourlyTimeZone}` : ''}`
+  const hoursLabel = hourWindow ? `${hourWindow.range} · ${hourWindow.zoneLabel}` : ''
+  const slots = hourWindow?.slots ?? []
+  const slotsByHour = new Map(slots.map((slot) => [slot.hour, slot]))
   const readingsByHour = new Map(readings.map((reading) => [reading.hour, reading]))
   const missingValue = <span aria-label={missingLabel} title={missingLabel}>—</span>
   const formatValue = (value: number | null | undefined) => typeof value === 'number' && Number.isFinite(value)
@@ -87,29 +89,29 @@ export default function BeachDayHours({
       {readings.length === 0 ? <p>{copy.noHourlyData}</p> : (
         <div className="beach-hourly-scroll" tabIndex={0} role="region" aria-label={`${copy.hourlyTitle} · ${date}`}>
           <table className="beach-hourly-matrix">
-            <caption className="sr-only">{copy.hourlyTitle} · {date}</caption>
+            <caption className="sr-only">{copy.hourlyTitle} · {date} · {hourWindow?.zoneLabel}</caption>
             <thead>
               <tr>
                 <th scope="col">{copy.time}</th>
-                {DAYTIME_HOURS.map((hour) => <th scope="col" key={hour}>{String(hour).padStart(2, '0')}:00</th>)}
+                {slots.map((slot) => <th scope="col" key={slot.hour}><time dateTime={slot.instant}>{slot.label}</time></th>)}
               </tr>
             </thead>
             <tbody>
               {hourlyAir && <tr className="beach-hourly-air-values">
                 <th scope="row">{copy.air} °C</th>
-                {DAYTIME_HOURS.map((hour) => <td key={hour}>{formatValue(readingsByHour.get(hour)?.airTemperatureCelsius)}</td>)}
+                {slots.map(({ hour }) => <td key={hour}>{formatValue(readingsByHour.get(hour)?.airTemperatureCelsius)}</td>)}
               </tr>}
               <tr className="beach-hourly-water">
                 <th scope="row">{copy.water} °C</th>
-                {DAYTIME_HOURS.map((hour) => <td key={hour}>{formatValue(readingsByHour.get(hour)?.waterTemperatureCelsius)}</td>)}
+                {slots.map(({ hour }) => <td key={hour}>{formatValue(readingsByHour.get(hour)?.waterTemperatureCelsius)}</td>)}
               </tr>
               <tr className="beach-hourly-wind">
                 <th scope="row">{copy.wind} {windSuffix}</th>
-                {DAYTIME_HOURS.map((hour) => <td key={hour}>{formatWind(readingsByHour.get(hour)?.windKnots)}</td>)}
+                {slots.map(({ hour }) => <td key={hour}>{formatWind(readingsByHour.get(hour)?.windKnots)}</td>)}
               </tr>
               <tr className="beach-hourly-wind">
                 <th scope="row" title={directionHint}>{copy.direction}</th>
-                {DAYTIME_HOURS.map((hour) => <td key={hour}>{renderDirection(readingsByHour.get(hour)?.windDirection)}</td>)}
+                {slots.map(({ hour }) => <td key={hour}>{renderDirection(readingsByHour.get(hour)?.windDirection)}</td>)}
               </tr>
             </tbody>
           </table>
@@ -118,7 +120,7 @@ export default function BeachDayHours({
     </>
   ) : readings.length === 0 ? <p>{copy.noHourlyData}</p> : (
     <table>
-      <caption className="sr-only">{copy.hourlyTitle} · {date}</caption>
+      <caption className="sr-only">{copy.hourlyTitle} · {date} · {hourWindow?.zoneLabel}</caption>
       <thead><tr>
         <th scope="col">{copy.time}</th>
         {hourlyAir && <th scope="col">{copy.air} °C</th>}
@@ -128,7 +130,7 @@ export default function BeachDayHours({
       </tr></thead>
       <tbody>{readings.map((reading) => (
         <tr key={reading.hour}>
-          <th scope="row">{String(reading.hour).padStart(2, '0')}:00</th>
+          <th scope="row"><time dateTime={slotsByHour.get(reading.hour)!.instant}>{slotsByHour.get(reading.hour)!.label}</time></th>
           {hourlyAir && <td>{formatValue(reading.airTemperatureCelsius)}</td>}
           <td>{formatValue(reading.waterTemperatureCelsius)}</td>
           <td>{formatWind(reading.windKnots)}</td>

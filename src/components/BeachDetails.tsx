@@ -1,13 +1,16 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, Droplets, ExternalLink, ThermometerSun, Wind } from 'lucide-react'
 import { historyPointFromTimeline, loadHistoryBeachHistories, loadTimelineIndex } from '../data/api'
 import { getCopy, type Language } from '../i18n'
 import { forecastForDate } from '../lib/beach-discovery'
 import { lisbonDate } from '../lib/date-classification'
+import { localDaytimeWindow } from '../lib/daytime-hours'
+import { timeZoneForBeach } from '../lib/time-zone'
 import { availableHistoryDates, historyPeriodBounds } from '../lib/history-period'
 import { convertWind, formatDistance, type WindUnit } from '../lib/units'
 import type { BeachViewModel, HistoryPoint, MapMetric } from '../types'
 import BeachDayHours from './BeachDayHours'
+import BeachTides from './BeachTides'
 import LoadingIndicator from './LoadingIndicator'
 
 const MetricHistoryChart = lazy(() => import('./MetricHistoryChart'))
@@ -37,6 +40,8 @@ export default function BeachDetails({
   const [attempt, setAttempt] = useState(0)
   const forecast = forecastForDate(beach, date)
   const windLabel = windUnit === 'kmh' ? 'km/h' : 'kn'
+  const timeZone = timeZoneForBeach(beach.territory)
+  const daytime = useMemo(() => date ? localDaytimeWindow(date, timeZone, language) : null, [date, timeZone, language])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -91,12 +96,12 @@ export default function BeachDetails({
             <small>{pt ? 'mín' : 'min'} {number(forecast.airMin, 0)}°</small>
           </button>
           <button className="beach-kpi beach-kpi-wind" type="button" aria-pressed={metric === 'wind'}
-            aria-label={`${copy.wind}: ${copy.average} ${number(convertWind(forecast.windAverageKnots, windUnit))} ${windLabel}, 08–18h`}
+            aria-label={`${copy.wind}: ${copy.average} ${number(convertWind(forecast.windAverageKnots, windUnit))} ${windLabel}, ${daytime?.range ?? ''} ${daytime?.zoneLabel ?? ''}`}
             onClick={() => onMetricChange('wind')}>
             <span><Wind size={17} />{copy.wind}</span>
             <strong>{number(convertWind(forecast.windAverageKnots, windUnit))}<small>{windLabel}</small></strong>
             <span>{copy.average}</span>
-            <small>08–18h</small>
+            <small title={daytime?.zoneLabel}>{daytime?.range}</small>
           </button>
         </div>
       )}
@@ -123,7 +128,8 @@ export default function BeachDetails({
           </>
         )}
       </section>
-      <BeachDayHours key={`${beach.id}/${date}`} beachId={beach.id} date={date} language={language} windUnit={windUnit} />
+      <BeachDayHours key={`${beach.id}/${date}`} beachId={beach.id} date={date} language={language} windUnit={windUnit} timeZone={timeZone} />
+      <BeachTides beachId={beach.id} date={date} language={language} timeZone={timeZone} />
       <div className="beach-data-note">
         {forecast && <p>{pt ? 'Ar: previsão de' : 'Air: forecast for'} {forecast.airLocation} · {formatDistance(forecast.airDistanceKm)}</p>}
         <a target="_blank" rel="noreferrer noopener"

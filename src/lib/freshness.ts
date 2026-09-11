@@ -1,32 +1,11 @@
-function validTimestamp(value: string) {
-  const timestamp = new Date(value)
-  if (!Number.isFinite(timestamp.getTime())) {
-    throw new Error(`Invalid forecast timestamp: ${value}`)
-  }
-  return timestamp
-}
+import { dateInTimeZone, DEFAULT_TIME_ZONE, formatClock } from './time-zone'
 
 export function formatFreshnessTimestamp(
   generatedAt: string,
-  _language: 'pt' | 'en',
+  timeZone: string = DEFAULT_TIME_ZONE,
+  compact = false,
 ): string {
-  const timestamp = validTimestamp(generatedAt)
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    hourCycle: 'h23',
-    timeZone: 'Europe/Lisbon',
-  }).formatToParts(timestamp)
-  const value = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((part) => part.type === type)?.value
-  const year = value('year')
-  const month = value('month')
-  const day = value('day')
-  const hour = value('hour')
-  if (!year || !month || !day || !hour) {
-    throw new Error(`Unable to format forecast timestamp: ${generatedAt}`)
-  }
-  return `${year}-${month}-${day} ${hour}H`
+  const date = dateInTimeZone(generatedAt, timeZone)
+  const hour = formatClock(generatedAt, timeZone).slice(0, 2)
+  return `${compact ? `${date.slice(8)}/${date.slice(5, 7)}` : date} ${hour}H`
 }

@@ -6,9 +6,10 @@ interface RelativeLabel {
   compactDate: string
 }
 
+// Forecast dates are calendar labels, not instants in the visitor's timezone.
 const compactDateFormats = {
-  pt: new Intl.DateTimeFormat('pt-PT', { day: '2-digit', month: 'short' }),
-  en: new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short' }),
+  pt: new Intl.DateTimeFormat('pt-PT', { day: '2-digit', month: 'short', timeZone: 'UTC' }),
+  en: new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' }),
 }
 const chartDateFormats: Partial<Record<Language, { short: Intl.DateTimeFormat; full: Intl.DateTimeFormat }>> = {}
 
@@ -20,8 +21,8 @@ export function formatChartDate(date: string, language: Language, year = false) 
   if (!date) return ''
   const locale = language === 'pt' ? 'pt-PT' : 'en-GB'
   const formats = chartDateFormats[language] ??= {
-    short: new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short' }),
-    full: new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', year: 'numeric' }),
+    short: new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', timeZone: 'UTC' }),
+    full: new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }),
   }
   return (year ? formats.full : formats.short).format(new Date(`${date}T12:00:00Z`))
 }

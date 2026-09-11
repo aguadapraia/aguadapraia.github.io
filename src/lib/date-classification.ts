@@ -1,17 +1,8 @@
 import type { DateKind } from '../types'
-
-const calendarFormat = new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'Europe/Lisbon',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-})
+import { dateInTimeZone } from './time-zone'
 
 export function lisbonDate(now = new Date()): string {
-  const parts = calendarFormat.formatToParts(now)
-  const value = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((part) => part.type === type)?.value ?? ''
-  return `${value('year')}-${value('month')}-${value('day')}`
+  return dateInTimeZone(now)
 }
 
 export function preferredForecastDate(

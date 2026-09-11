@@ -18,7 +18,8 @@ import { uniqueShortBeachName } from '../lib/beach-name'
 import { normalizeBeachSearch } from '../lib/beach-search'
 import { HIGHLIGHT_SIMILARITY } from '../lib/highlight-policy'
 import { lisbonDate } from '../lib/date-classification'
-import { daytimeReadings, hasHourlyAir } from '../lib/daytime-hours'
+import { daytimeReadings, hasHourlyAir, localDaytimeWindow } from '../lib/daytime-hours'
+import { timeZoneForBeach } from '../lib/time-zone'
 import {
   chartLineReadings, chartLineStatistics, chartReadingRange, DEFAULT_CHART_VISIBILITY,
   summarizeChartStatistic, visibleChartReadings, visibleChartStatistics, type ChartReadings, type ChartStatistic,
@@ -60,10 +61,10 @@ const text = {
     gap: 'dias sem publicação',
     coverage: 'dias com dados', days: 'dias', of: 'de',
     territoryReading: 'A linha mostra a média entre praias; a faixa mostra o mínimo e o máximo diários.',
-    hourlyKey: '08:00–18:00 · valores horários',
+    hourlyKey: 'Hora local',
     temperatureReading: 'A média territorial usa os pontos médios entre os mínimos e máximos de cada praia.',
     beachReading: 'Uma cor por praia. Mínimos e máximos diários; para o vento, também a média diurna.',
-    hourlyReading: 'Valores horários publicados, das 08:00 às 18:00. As horas sem dados ficam em branco.',
+    hourlyReading: 'Comparação pela hora local de cada praia. Os valores publicados são preservados e as horas sem dados ficam em branco.',
     airDaily: 'Ar: mín. e máx. diárias; sem valores horários.',
     periodSummary: 'Resumo das séries visíveis', minimum: 'Mín.', maximum: 'Máx.', average: 'Média',
     territorySummary: 'Extremos de todas as praias da região. Média dos valores diários da linha.',
@@ -74,7 +75,7 @@ const text = {
     recordDay: 'Ver este dia no mapa',
     recordBeach: 'Ver praia e dia no mapa', recordLocations: 'Extremos por praia',
     highest: 'Máximos', lowest: 'Mínimos', recordsUnavailable: 'Extremos por praia indisponíveis.',
-    hourly: 'Valores por hora', time: 'Hora', water: 'Água', air: 'Ar', wind: 'Vento',
+    hourly: 'Valores por hora', water: 'Água', air: 'Ar', wind: 'Vento',
     windDirection: 'Direção do vento', loading: 'A carregar o período…', retry: 'Tentar novamente',
     windDirectionNote: 'A direção indica de onde vem o vento; as setas mostram para onde sopra.',
     loadError: 'Não foi possível carregar estes dados. Tenta novamente.',
@@ -104,10 +105,10 @@ const text = {
     gap: 'days without a publication',
     coverage: 'days with data', days: 'days', of: 'of',
     territoryReading: 'The line shows the average across beaches; the band shows the daily minimum and maximum.',
-    hourlyKey: '08:00–18:00 · hourly values',
+    hourlyKey: 'Local time',
     temperatureReading: 'The territory average uses the midpoint of each beach’s minimum and maximum.',
     beachReading: 'One colour per beach. Daily minimum and maximum; wind also has a daytime average.',
-    hourlyReading: 'Published hourly values, 08:00–18:00. Hours without data are left blank.',
+    hourlyReading: 'Compared by each beach’s local time. Published values are preserved and hours without data are left blank.',
     airDaily: 'Air: daily min and max only; no hourly values.',
     periodSummary: 'Summary of visible series', minimum: 'Min.', maximum: 'Max.', average: 'Average',
     territorySummary: 'Extremes across all beaches in the region. Average of the daily line values.',
@@ -118,7 +119,7 @@ const text = {
     recordDay: 'Show this day on the map',
     recordBeach: 'Show beach and date on the map', recordLocations: 'Beach extremes',
     highest: 'Highest', lowest: 'Lowest', recordsUnavailable: 'Beach extremes are unavailable.',
-    hourly: 'Hourly values', time: 'Time', water: 'Water', air: 'Air', wind: 'Wind',
+    hourly: 'Hourly values', water: 'Water', air: 'Air', wind: 'Wind',
     windDirection: 'Wind direction', loading: 'Loading this period…', retry: 'Try again',
     windDirectionNote: 'Direction indicates where the wind comes from; arrows show where it blows.',
     loadError: 'These data could not be loaded. Please try again.',
@@ -502,11 +503,20 @@ export default function HistoryView({
     ? [{ key: 'territory', name: territoryName, color: metricColor }]
     : activeBeaches.map((beach, index) => ({ key: `beach${index}`, name: uniqueShortBeachName(beach, dataset.beaches), color: beachColor(index) }))
   const hourlyMode = singleDay && scope === 'beaches'
-  const hourlyAirAvailable = activeBeaches.some((beach) => hasHourlyAir(dayDetails.get(beach.id)?.hourly ?? []))
+  const localHourly = hourlyMode && period ? activeBeaches.map((beach) => {
+    const timeZone = timeZoneForBeach(beach.territory)
+    const window = localDaytimeWindow(period.start, timeZone, language)
+    const selectedReadings = daytimeReadings(dayDetails.get(beach.id)?.hourly ?? [], window)
+    const source = new Map(selectedReadings.map((reading) => [reading.hour, reading]))
+    const readings = new Map(window.slots.map((slot) => [slot.label, source.get(slot.hour)]))
+    return { window, readings, hasAir: hasHourlyAir(selectedReadings) }
+  }) : []
+  const hourlyAirAvailable = localHourly.some((item) => item.hasAir)
   const dailyAirFallback = hourlyMode && metric === 'air' && !hourlyAirAvailable
-  const hourlyUtc = activeBeaches.length > 0 && activeBeaches.every((beach) => dayDetails.get(beach.id)?.hourlyTimeZone === 'UTC')
+  const localHourLabels = [...new Set(localHourly.flatMap(({ window }) => window.slots.map((slot) => slot.label)))].sort()
+  const hourlyZoneLabels = [...new Set(localHourly.map(({ window }) => window.zoneLabel))]
   const missingHourlyAir = hourlyMode && metric === 'air' && hourlyAirAvailable
-    ? activeBeaches.filter((beach) => !hasHourlyAir(dayDetails.get(beach.id)?.hourly ?? []))
+    ? activeBeaches.filter((_, index) => !localHourly[index]?.hasAir)
     : []
   const statistics: ChartStatistic[] = hourlyMode && !dailyAirFallback
     ? ['value']
@@ -578,11 +588,10 @@ export default function HistoryView({
   })
   prepareLines(chartData)
 
-  const hourlyData: ChartPoint[] = Array.from({ length: 11 }, (_, index) => {
-    const hour = index + 8
-    const row: ChartPoint = { date: `${hour.toString().padStart(2, '0')}:00` }
-    activeBeaches.forEach((beach, beachIndex) => {
-      const reading = daytimeReadings(dayDetails.get(beach.id)?.hourly ?? []).find((item) => item.hour === hour)
+  const hourlyData: ChartPoint[] = localHourLabels.map((label) => {
+    const row: ChartPoint = { date: label }
+    localHourly.forEach(({ readings }, beachIndex) => {
+      const reading = readings.get(label)
       const value = finite(metric === 'water' ? reading?.waterTemperatureCelsius : metric === 'wind' ? reading?.windKnots : reading?.airTemperatureCelsius)
       writeReadings(row, `beach${beachIndex}`, { value })
     })
@@ -799,7 +808,7 @@ export default function HistoryView({
                     if (!active || !payload?.length) return null
                     const row = payload[0]?.payload as ChartPoint | undefined
                     if (!row) return null
-                    return <div className="history-tooltip"><strong>{hourlyMode ? `${periodLabel} · ${label}` : formatDate(String(label), language, true)}</strong><small>{t.dayKindArchive} · {unit}</small>
+                    return <div className="history-tooltip"><strong>{hourlyMode ? `${periodLabel} · ${label} · ${t.hourlyKey}` : formatDate(String(label), language, true)}</strong><small>{t.dayKindArchive} · {unit}</small>
                       <table><thead><tr><th scope="col">{scope === 'territory' ? t.territoryAverage : t.beaches}</th>{enabledStatistics.map((statistic) => <th scope="col" key={statistic}>{statisticLabels[statistic]}</th>)}</tr></thead>
                         <tbody>{series.map((item) => <tr key={item.key}>
                           <th scope="row"><i style={{ background: item.color }} aria-hidden="true" />{item.name}</th>
@@ -840,7 +849,7 @@ export default function HistoryView({
             <>
               <ChartSeriesLegend language={language} visibility={visibility} statistics={statistics} showForecast={false}
                 help={`${readingHelp} ${t.legendHelp}`} onToggle={(key) => setVisibility((value) => ({ ...value, [key]: !value[key] }))} />
-              {hourlyMode && !dailyAirFallback && <p className="history-reading">{t.hourlyKey}{hourlyUtc ? ' · UTC' : ''}</p>}
+              {hourlyMode && !dailyAirFallback && <p className="history-reading">{t.hourlyKey} · {hourlyZoneLabels.join(' · ')}</p>}
               {missingHourlyAir.length > 0 && <p className="history-note">
                 {language === 'pt' ? 'Sem ar horário' : 'No hourly air'}: {missingHourlyAir.map((beach) => uniqueShortBeachName(beach, dataset.beaches)).join(', ')}
               </p>}
@@ -918,10 +927,10 @@ export default function HistoryView({
             <summary>{t.hourly}{metric === 'wind' ? ` · ${t.windDirection}` : ''}<ChevronDown size={18} aria-hidden="true" /></summary>
             {metric === 'wind' && <p className="history-note">{t.windDirectionNote}</p>}
             <div className="history-hourly-scroll" tabIndex={0} role="region" aria-label={t.hourly}>
-              <table><caption>{periodLabel} · {unit}{hourlyUtc ? ' · UTC' : ''}</caption><thead><tr><th scope="col">{t.time}</th>{activeBeaches.map((beach, index) => <th key={beach.id} scope="col">{series[index].name}</th>)}</tr></thead>
-                <tbody>{Array.from({ length: 11 }, (_, index) => index + 8).map((hour) => <tr key={hour}><th scope="row">{`${hour.toString().padStart(2, '0')}:00`}</th>
-                  {activeBeaches.map((beach) => {
-                    const reading = daytimeReadings(dayDetails.get(beach.id)?.hourly ?? []).find((item) => item.hour === hour)
+              <table><caption>{periodLabel} · {unit} · {hourlyZoneLabels.join(' · ')}</caption><thead><tr><th scope="col">{t.hourlyKey}</th>{activeBeaches.map((beach, index) => <th key={beach.id} scope="col" title={localHourly[index]?.window.zoneLabel}>{series[index].name}</th>)}</tr></thead>
+                <tbody>{localHourLabels.map((label) => <tr key={label}><th scope="row">{label}</th>
+                  {activeBeaches.map((beach, index) => {
+                    const reading = localHourly[index]?.readings.get(label)
                     const value = finite(metric === 'water' ? reading?.waterTemperatureCelsius : metric === 'air' ? reading?.airTemperatureCelsius : reading?.windKnots)
                     const direction = reading?.windDirection
                     const degrees = windDirectionDegrees(direction)

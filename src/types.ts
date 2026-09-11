@@ -50,6 +50,33 @@ export interface BeachDayDetail {
   hourlyTimeZone?: 'UTC'
 }
 
+export type ForecastTimeZone = 'Europe/Lisbon' | 'Atlantic/Madeira' | 'Atlantic/Azores'
+
+export interface BeachTideForecast {
+  schemaVersion: 1
+  beachId: string
+  date: string
+  timeZone: ForecastTimeZone
+  status: 'available' | 'stale' | 'unsupported' | 'unavailable'
+  reference: {
+    portId: string
+    name: string
+    distanceKm: number
+    approximate: true
+  } | null
+  source: {
+    name: 'Instituto Hidrográfico'
+    url: 'https://www.hidrografico.pt/'
+  }
+  events: {
+    timeUtc: string
+    kind: 'low' | 'high'
+    heightMeters: number
+  }[]
+  updatedAt: string | null
+  reason?: 'no-reference' | 'not-collected' | 'missing-day' | 'source-error'
+}
+
 export interface DailyBeachForecast {
   date: string
   waterMin: number

@@ -13,6 +13,7 @@ import { loadBeachDataset, prepareHistory } from './data/api'
 import { getCopy } from './i18n'
 import { lisbonDate, preferredForecastDate } from './lib/date-classification'
 import { formatFreshnessTimestamp } from './lib/freshness'
+import { DEFAULT_TIME_ZONE, timeZoneLabel } from './lib/time-zone'
 import { getRelativeLabel } from './lib/relative-date'
 import { loadSettings, saveSettings } from './lib/settings'
 import { canonicalUrlForView, pathForView, viewFromPath, type AppViewMode } from './lib/view-route'
@@ -422,7 +423,13 @@ export default function App() {
 
       <footer className="attribution-bar">
         <a className="attribution-source" href="https://www.ipma.pt/" target="_blank" rel="noreferrer noopener">
-          {copy.attribution} IPMA.pt<span>· <span className="attribution-freshness">{copy.freshness} </span><time dateTime={updatedAt} title={copy.freshness}>{formatFreshnessTimestamp(updatedAt, language)}</time></span>
+          {copy.attribution} IPMA.pt<span>· <span className="attribution-freshness">{copy.freshness} </span>
+            <time dateTime={updatedAt} title={`${copy.freshness} · ${formatFreshnessTimestamp(updatedAt)} · ${timeZoneLabel(updatedAt, DEFAULT_TIME_ZONE, language)}`}>
+              <span className="attribution-date-full">{formatFreshnessTimestamp(updatedAt)}</span>
+              <span className="attribution-date-compact">{formatFreshnessTimestamp(updatedAt, DEFAULT_TIME_ZONE, true)}</span>
+              {' '}{timeZoneLabel(updatedAt, DEFAULT_TIME_ZONE, language)}
+            </time>
+          </span>
         </a>
         <span className="attribution-credit">
           <a href="https://github.com/aguadapraia/aguadapraia.github.io" target="_blank" rel="noreferrer noopener"

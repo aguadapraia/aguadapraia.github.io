@@ -19,3 +19,5 @@ Filipe Caetano © 2026
 [MIT License](LICENSE).
 
 Data source: [Instituto Português do Mar e da Atmosfera (IPMA.pt)](https://www.ipma.pt/).
+
+Tide forecasts: [Instituto Hidrográfico de Portugal](https://www.hidrografico.pt/).

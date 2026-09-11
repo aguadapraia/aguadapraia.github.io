@@ -217,6 +217,23 @@ html[data-input-mode='keyboard'] .beach-search-field:has(input:focus-visible) { 
 .beach-hourly tbody th { font-weight: 500; }
 .beach-direction { display: inline-flex; align-items: center; gap: 3px; }
 .beach-direction svg { color: var(--metric-wind); }
+.beach-tides { padding: 10px 0; border-bottom: 1px solid var(--cp-border); }
+.beach-tides summary { cursor: pointer; font-size: 12px; font-weight: 600; }
+.beach-tides summary > svg { display: inline; vertical-align: middle; margin-inline: 3px 6px; color: var(--metric-water); }
+.beach-tides summary > small { float: right; color: var(--cp-text-muted); font-size: 11px; font-weight: 400; }
+.beach-tides-content { padding-top: 12px; }
+.beach-tide-times { display: grid; gap: 8px; margin: 0 0 12px; }
+.beach-tide-times > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.beach-tide-times dt { display: inline-flex; align-items: center; gap: 6px; color: var(--cp-text-muted); font-size: 12px; }
+.beach-tide-times dt svg { color: var(--metric-water); }
+.beach-tide-times dd { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin: 0; font-variant-numeric: tabular-nums; }
+.beach-tide-times time { padding: 3px 7px; border-radius: 5px; background: var(--cp-surface-soft); color: var(--cp-text); font-size: 13px; font-weight: 600; }
+.beach-tide-source { color: var(--cp-text-muted); font-size: 11px; line-height: 1.5; }
+.beach-tide-source p { margin: 0 0 4px; }
+.beach-tide-source strong { font-weight: 500; }
+.beach-tide-source a { display: inline-flex; align-items: center; gap: 4px; color: var(--cp-accent); }
+.beach-tide-unavailable, .beach-tide-warning { margin: 0 0 12px; font-size: 12px; line-height: 1.5; color: var(--cp-text-muted); }
+.beach-tide-warning { padding: 8px; border-left: 2px solid var(--cp-warning); background: var(--cp-surface-soft); }
 .beach-data-note { color: var(--cp-text-muted); font-size: 11px; line-height: 1.5; }
 .beach-data-note p { margin: 0 0 4px; }
 .beach-data-note a { display: inline-flex; align-items: center; gap: 6px; color: var(--cp-accent); }
@@ -224,6 +241,7 @@ html[data-input-mode='keyboard'] .beach-search-field:has(input:focus-visible) { 
 .beach-inline-error button, .beach-retry { padding: 8px 12px; border: 1px solid var(--cp-border); border-radius: 8px; background: var(--cp-surface); color: var(--cp-accent); cursor: pointer; }
 .beach-app .attribution-bar { flex: 0 0 auto; min-height: 34px; padding: 6px 20px; font-size: .67rem; }
 .beach-app .attribution-credit { font-size: .67rem; }
+.attribution-date-compact { display: none; }
 .beach-view-loading { display: grid; place-items: center; }
 .beach-stale-notice { margin: 0; padding: 8px 20px; background: var(--cp-highlight); color: var(--cp-text); font-size: 12px; }
 .beach-skip-link { position: fixed; left: 12px; top: -100px; z-index: 100; padding: 12px; border-radius: 8px; background: var(--cp-surface); color: var(--cp-accent); }
@@ -287,9 +305,12 @@ html[data-input-mode='keyboard'] .beach-search-field:has(input:focus-visible) { 
   .beach-app .attribution-bar { min-height: 28px; padding: 4px 8px; gap: 6px; font-size: 10.5px; }
   .beach-app .attribution-source { gap: 4px; }
   .beach-app .attribution-credit { font-size: inherit; }
+  .attribution-date-full { display: none; }
+  .attribution-date-compact { display: inline; }
   .attribution-copyright, .attribution-freshness { display: none; }
 }
 @media (max-width: 360px) {
+  .attribution-github > span { display: none; }
   .beach-app .site-header { gap: 4px; padding-inline: 8px; }
   .beach-navigation a { gap: 3px; padding-inline: 3px; font-size: 11px; }
   .beach-highlight-cards b { font-size: 16px; }
