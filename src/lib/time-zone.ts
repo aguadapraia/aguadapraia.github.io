@@ -62,6 +62,21 @@ function offsetLabel(value: Instant, timeZone: string): string {
   return `${match[1]}${Number(match[2])}${minutes ? `:${String(minutes).padStart(2, '0')}` : ''}`
 }
 
+export function utcOffsetLabel(instant: Instant, timeZone: string = DEFAULT_TIME_ZONE): string {
+  const offset = offsetLabel(instant, timeZone)
+  return offset === '+0' ? 'UTC' : `UTC${offset}`
+}
+
+export function localDateTimeZoneLabel(date: string, timeZone: ForecastTimeZone, language: Language): string {
+  const midnight = Date.parse(utcHourInstant(date, 0))
+  // Include the adjacent UTC hours that can belong to this Portuguese local date.
+  const instants = Array.from({ length: 27 }, (_, index) => midnight + (index - 1) * 3_600_000)
+    .filter((instant) => dateInTimeZone(instant, timeZone) === date)
+  const offsets = [...new Set(instants.map((instant) => utcOffsetLabel(instant, timeZone)))]
+  const place = timeZone === 'Atlantic/Azores' ? language === 'pt' ? 'Açores' : 'Azores' : 'Portugal'
+  return `${place} · ${offsets.join(' / ')}`
+}
+
 export function timeZoneRangeLabel(
   instants: readonly Instant[],
   timeZone: string = DEFAULT_TIME_ZONE,

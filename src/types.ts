@@ -95,6 +95,7 @@ export interface DailyBeachForecast {
   airMaxHour: number | null
   airLocation: string
   airDistanceKm: number
+  airMatchType?: 'exact-beach' | 'exact-location' | 'nearby-beach' | 'municipality' | 'fallback'
 }
 
 export interface DistrictWeatherForecast {

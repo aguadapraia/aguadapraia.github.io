@@ -386,7 +386,6 @@
   font-size: 0.8125rem;
 }
 
-.beach-table-source,
 .beach-table-missing {
   margin: 4px 0;
   color: var(--cp-text-muted);

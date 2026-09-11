@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { ArrowUpRight, Droplets, ExternalLink, ThermometerSun, Wind } from 'lucide-react'
+import { ArrowUpRight, Droplets, ThermometerSun, Wind } from 'lucide-react'
 import { historyPointFromTimeline, loadHistoryBeachHistories, loadTimelineIndex } from '../data/api'
 import { getCopy, type Language } from '../i18n'
 import { forecastForDate } from '../lib/beach-discovery'
@@ -7,9 +7,10 @@ import { lisbonDate } from '../lib/date-classification'
 import { localDaytimeWindow } from '../lib/daytime-hours'
 import { timeZoneForBeach } from '../lib/time-zone'
 import { availableHistoryDates, historyPeriodBounds } from '../lib/history-period'
-import { convertWind, formatDistance, type WindUnit } from '../lib/units'
+import { convertWind, type WindUnit } from '../lib/units'
 import type { BeachViewModel, HistoryPoint, MapMetric } from '../types'
 import BeachDayHours from './BeachDayHours'
+import BeachDataNote from './BeachDataNote'
 import BeachTides from './BeachTides'
 import LoadingIndicator from './LoadingIndicator'
 
@@ -130,13 +131,7 @@ export default function BeachDetails({
       </section>
       <BeachDayHours key={`${beach.id}/${date}`} beachId={beach.id} date={date} language={language} windUnit={windUnit} timeZone={timeZone} />
       <BeachTides beachId={beach.id} date={date} language={language} timeZone={timeZone} />
-      <div className="beach-data-note">
-        {forecast && <p>{pt ? 'Ar: previsão de' : 'Air: forecast for'} {forecast.airLocation} · {formatDistance(forecast.airDistanceKm)}</p>}
-        <a target="_blank" rel="noreferrer noopener"
-          href={`https://www.ipma.pt/pt/maritima/costeira/index.jsp?selLocal=${encodeURIComponent(beach.id)}&idLocal=${encodeURIComponent(beach.id)}`}>
-          {pt ? 'Ver praia no IPMA.pt' : 'View beach on IPMA.pt'}<ExternalLink size={12} /><span className="sr-only">{copy.opensNewWindow}</span>
-        </a>
-      </div>
+      <BeachDataNote beach={beach} date={date} forecast={forecast} language={language} />
     </section>
   )
 }

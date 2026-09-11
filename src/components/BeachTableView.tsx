@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, Droplets, History, Map, Search, ThermometerSun, Wind, X } from 'lucide-react'
 import { getCopy, type Language } from '../i18n'
-import { convertWind, formatDistance, type WindUnit } from '../lib/units'
+import { convertWind, type WindUnit } from '../lib/units'
 import { timeZoneForBeach } from '../lib/time-zone'
 import {
   defaultSortState,
@@ -16,6 +16,7 @@ import {
 } from '../lib/beach-table'
 import { Button } from './ui/button'
 import BeachDayHours from './BeachDayHours'
+import BeachDataNote from './BeachDataNote'
 import BeachTides from './BeachTides'
 import type { BeachViewModel } from '../types'
 import './beach-table.css'
@@ -46,7 +47,6 @@ const TABLE_COPY = {
     min: 'Mín.',
     max: 'Máx.',
     average: 'Média',
-    airStation: 'Estação da previsão do ar',
     ascending: 'crescente',
     descending: 'decrescente',
     sortBy: 'Ordenar por',
@@ -76,7 +76,6 @@ const TABLE_COPY = {
     min: 'Min.',
     max: 'Max.',
     average: 'Average',
-    airStation: 'Air forecast station',
     ascending: 'ascending',
     descending: 'descending',
     sortBy: 'Sort by',
@@ -304,12 +303,6 @@ export default function BeachTableView({
                                 </div>
                               </div>
                               {!forecast && <p className="beach-table-missing">{text.missing}</p>}
-                              {forecast?.airLocation && (
-                                <p className="beach-table-source">
-                                  {text.airStation}: {forecast.airLocation}
-                                  {hasTableValue(forecast.airDistanceKm) && ` · ${formatDistance(forecast.airDistanceKm)}`}
-                                </p>
-                              )}
                               {activeDate && (
                                 <>
                                   <BeachDayHours
@@ -322,6 +315,7 @@ export default function BeachTableView({
                                     layout="compact"
                                   />
                                   <BeachTides beachId={beach.id} date={activeDate} language={language} timeZone={timeZoneForBeach(beach.territory)} />
+                                  <BeachDataNote beach={beach} date={activeDate} forecast={forecast} language={language} />
                                 </>
                               )}
                             </section>

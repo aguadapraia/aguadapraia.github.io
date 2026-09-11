@@ -48,7 +48,7 @@ export default function BeachDayHours({
   const currentDetail = detail?.beachId === beachId && detail.date === date ? detail : null
   const readings = currentDetail && hourWindow ? daytimeReadings(currentDetail.hourly, hourWindow) : []
   const hourlyAir = hasHourlyAir(readings)
-  const hoursLabel = hourWindow ? `${hourWindow.range} · ${hourWindow.zoneLabel}` : ''
+  const hoursLabel = hourWindow?.range ?? ''
   const slots = hourWindow?.slots ?? []
   const slotsByHour = new Map(slots.map((slot) => [slot.hour, slot]))
   const readingsByHour = new Map(readings.map((reading) => [reading.hour, reading]))

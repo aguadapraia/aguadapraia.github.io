@@ -70,12 +70,7 @@ interface RawAirTemperature {
   beachId: string
   forecastDate: string
   locationName: string
-  weatherMatchType?:
-    | 'exact-beach'
-    | 'exact-location'
-    | 'nearby-beach'
-    | 'municipality'
-    | 'fallback'
+  weatherMatchType?: DailyBeachForecast['airMatchType']
   physicalDistanceKm?: number
   distanceKm: number
   minimumCelsius: number
@@ -410,7 +405,7 @@ const beachTideForecastSchema: z.ZodType<BeachTideForecast> = z.object({
   reference: z.object({
     portId: z.string().regex(/^\d+$/),
     name: z.string().min(1),
-    distanceKm: z.number().nonnegative(),
+    distanceKm: z.number().min(0).max(60),
     approximate: z.literal(true),
   }).nullable(),
   source: z.object({
@@ -420,28 +415,39 @@ const beachTideForecastSchema: z.ZodType<BeachTideForecast> = z.object({
   events: z.array(z.object({
     timeUtc: z.string().datetime(),
     kind: z.enum(['low', 'high']),
-    heightMeters: z.number().min(-5).max(20),
-  })).max(8),
+    heightMeters: z.number().min(-5).max(15),
+  })).max(5),
   updatedAt: z.string().datetime({ offset: true }).nullable(),
   reason: z.enum(['no-reference', 'not-collected', 'missing-day', 'source-error']).optional(),
 }).superRefine((forecast, context) => {
   const hasForecast = forecast.status === 'available' || forecast.status === 'stale'
-  if (hasForecast && (!forecast.reference || !forecast.updatedAt || forecast.events.length === 0)) {
+  if (hasForecast && (!forecast.reference || !forecast.updatedAt || forecast.events.length < 3)) {
     context.addIssue({ code: 'custom', message: 'Tide forecast is incomplete' })
   }
-  if (!hasForecast && forecast.events.length !== 0) {
+  if (!hasForecast && (forecast.events.length !== 0 || forecast.updatedAt !== null)) {
     context.addIssue({ code: 'custom', message: 'Unavailable tide forecast contains events' })
   }
   if (forecast.status === 'unsupported' && forecast.reference !== null) {
     context.addIssue({ code: 'custom', message: 'Unsupported tide forecast contains a reference' })
+  }
+  if ((forecast.status === 'available' && forecast.reason !== undefined) ||
+      (forecast.status === 'stale' && forecast.reason !== 'source-error' && forecast.reason !== 'missing-day') ||
+      (forecast.status === 'unsupported' && forecast.reason !== 'no-reference') ||
+      (forecast.status === 'unavailable' && forecast.reason !== 'not-collected' && forecast.reason !== 'missing-day' && forecast.reason !== 'source-error')) {
+    context.addIssue({ code: 'custom', message: 'Tide status and reason are inconsistent' })
   }
   forecast.events.forEach((event, index) => {
     if (!Number.isFinite(Date.parse(event.timeUtc))) return
     if (dateInTimeZone(event.timeUtc, forecast.timeZone) !== forecast.date) {
       context.addIssue({ code: 'custom', message: 'Tide event falls outside the selected local date' })
     }
-    if (index > 0 && Date.parse(event.timeUtc) <= Date.parse(forecast.events[index - 1].timeUtc)) {
-      context.addIssue({ code: 'custom', message: 'Tide events must be unique and chronological' })
+    if (index > 0) {
+      const previous = forecast.events[index - 1]
+      const hours = (Date.parse(event.timeUtc) - Date.parse(previous.timeUtc)) / 3_600_000
+      if (hours < 4 || hours > 9 || previous.kind === event.kind ||
+          (previous.kind === 'high' ? previous.heightMeters <= event.heightMeters : previous.heightMeters >= event.heightMeters)) {
+        context.addIssue({ code: 'custom', message: 'Tide extrema must alternate with consistent times and heights' })
+      }
     }
   })
 })
@@ -536,6 +542,7 @@ function createDailyForecast(
     airMaxHour: air.maximumHourUtc ?? null,
     airLocation: air.locationName,
     airDistanceKm: air.distanceKm,
+    airMatchType: air.weatherMatchType,
   }
 }
 
