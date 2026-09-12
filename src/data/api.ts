@@ -407,6 +407,11 @@ const beachTideForecastSchema: z.ZodType<BeachTideForecast> = z.object({
     name: z.string().min(1),
     distanceKm: z.number().min(0).max(60),
     approximate: z.literal(true),
+    concordance: z.object({
+      key: z.string().regex(/^ih2026-[a-z0-9-]{1,48}$/),
+      sourcePortName: z.string().trim().min(1),
+      edition: z.literal(2026),
+    }).optional(),
   }).nullable(),
   source: z.object({
     name: z.literal('Instituto Hidrográfico'),
@@ -423,6 +428,10 @@ const beachTideForecastSchema: z.ZodType<BeachTideForecast> = z.object({
   const hasForecast = forecast.status === 'available' || forecast.status === 'stale'
   if (hasForecast && (!forecast.reference || !forecast.updatedAt || forecast.events.length < 3)) {
     context.addIssue({ code: 'custom', message: 'Tide forecast is incomplete' })
+  }
+  if (hasForecast && forecast.reference?.concordance &&
+      !forecast.date.startsWith(`${forecast.reference.concordance.edition}-`)) {
+    context.addIssue({ code: 'custom', message: 'IH concordance edition does not cover this date' })
   }
   if (!hasForecast && (forecast.events.length !== 0 || forecast.updatedAt !== null)) {
     context.addIssue({ code: 'custom', message: 'Unavailable tide forecast contains events' })

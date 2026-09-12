@@ -72,6 +72,14 @@ export default function BeachTides({ beachId, date, language, timeZone }: {
           {copy.tideReference} {current.reference.name} · {formatDistance(current.reference.distanceKm)}
           <span className="sr-only">. {copy.tideApproximation}</span>
         </p>}
+        {current.reference?.concordance && <p>
+          <a href="https://loja.hidrografico.pt/ln/web/wp-content/uploads/2023/11/TabelaMare_I_2026_signed.pdf#page=194"
+            target="_blank" rel="noreferrer noopener">
+            {language === 'pt' ? 'Concordância IH' : 'IH tidal correction'} {current.reference.concordance.edition}
+            <ExternalLink size={11} aria-hidden="true" /><span className="sr-only">{copy.opensNewWindow}</span>
+          </a>
+          {' · '}{language === 'pt' ? 'via' : 'from'} {current.reference.concordance.sourcePortName}
+        </p>}
       </div>
     </>
   )

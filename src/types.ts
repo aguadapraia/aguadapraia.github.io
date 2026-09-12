@@ -59,10 +59,16 @@ export interface BeachTideForecast {
   timeZone: ForecastTimeZone
   status: 'available' | 'stale' | 'unsupported' | 'unavailable'
   reference: {
+    // IH principal source ID; an optional concordance identifies the secondary port.
     portId: string
     name: string
     distanceKm: number
     approximate: true
+    concordance?: {
+      key: string
+      sourcePortName: string
+      edition: 2026
+    }
   } | null
   source: {
     name: 'Instituto Hidrográfico'
