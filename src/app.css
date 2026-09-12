@@ -320,7 +320,6 @@ html[data-input-mode='keyboard'] .beach-search-field:has(input:focus-visible) { 
   .attribution-copyright, .attribution-freshness { display: none; }
 }
 @media (max-width: 360px) {
-  .attribution-github > span { display: none; }
   .beach-app .site-header { gap: 4px; padding-inline: 8px; }
   .beach-navigation a { gap: 3px; padding-inline: 3px; font-size: 11px; }
   .beach-highlight-cards b { font-size: 16px; }

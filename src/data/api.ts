@@ -541,7 +541,7 @@ function createDailyForecast(
     airMinHour: air.minimumHourUtc ?? null,
     airMaxHour: air.maximumHourUtc ?? null,
     airLocation: air.locationName,
-    airDistanceKm: air.distanceKm,
+    airDistanceKm: air.physicalDistanceKm ?? air.distanceKm,
     airMatchType: air.weatherMatchType,
   }
 }
